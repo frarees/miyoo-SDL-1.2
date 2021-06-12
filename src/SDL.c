@@ -149,6 +149,9 @@ int SDL_InitSubSystem(Uint32 flags)
 
 int SDL_Init(Uint32 flags)
 {
+	// TRIMUI
+	printf("[SDL_Init] : libSDL modified for Trimui Model S.\n"); fflush(stdout);
+	
 #if !SDL_THREADS_DISABLED && SDL_THREAD_PTH
 	if (!pth_init()) {
 		return -1;

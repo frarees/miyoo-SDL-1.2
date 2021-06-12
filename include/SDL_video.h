@@ -140,15 +140,15 @@ typedef struct SDL_Surface {
 #define SDL_DOUBLEBUF	0x40000000	/**< Set up double-buffered video mode */
 #define SDL_TRIPLEBUF	0x40000100	/**< Set up triple-buffered video mode */
 #define SDL_FULLSCREEN	0x80000000	/**< Surface is a full screen display */
-#define SDL_OPENGL      0x00000002      /**< Create an OpenGL rendering context */
+#define SDL_OPENGL      0x00000002  /**< Create an OpenGL rendering context */
 #define SDL_OPENGLBLIT	0x0000000A	/**< Create an OpenGL rendering context and use it for blitting */
 #define SDL_RESIZABLE	0x00000010	/**< This video mode may be resized */
-#define SDL_NOFRAME	0x00000020	/**< No window caption or edge frame */
+#define SDL_NOFRAME		0x00000020	/**< No window caption or edge frame */
 /*@}*/
 
 /** Used internally (read-only) */
 /*@{*/
-#define SDL_HWACCEL	0x00000100	/**< Blit uses hardware acceleration */
+#define SDL_HWACCEL		0x00000100	/**< Blit uses hardware acceleration */
 #define SDL_SRCCOLORKEY	0x00001000	/**< Blit uses a source color key */
 #define SDL_RLEACCELOK	0x00002000	/**< Private flag */
 #define SDL_RLEACCEL	0x00004000	/**< Surface is RLE encoded */

@@ -31,6 +31,108 @@
 #include "../events/SDL_sysevents.h"
 #include "../events/SDL_events_c.h"
 
+// TRIMUI
+#include <sys/mman.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+
+#include <sys/ioctl.h>
+#include <linux/fb.h>
+#include <pthread.h>
+
+int			fb0_fd = 0;
+uint8_t*	fb0_map = 0;
+uint32_t	flip_flag;
+
+int			mem_fd = 0;
+uint32_t*	debe_map = 0;
+uint32_t	fb_addr;
+#define		DEBE_LAY3_FB_ADDR_REG	0x85C
+#define		TCON_DEBUG_INFO_REG	0xFC
+pthread_t	flip_pt = 0;
+pthread_mutex_t	flip_mx;
+pthread_cond_t	flip_req;
+
+static void* FB_FlipThread(void* param) {
+	while(1) {
+		pthread_mutex_lock(&flip_mx);
+		pthread_cond_wait(&flip_req,&flip_mx);
+		pthread_mutex_unlock(&flip_mx);
+		while(1) {
+			uint16_t* tcon_map = (uint16_t*)mmap(0, TCON_DEBUG_INFO_REG+4, PROT_READ, MAP_PRIVATE, mem_fd, 0x01c0c000);	// TCON
+			uint16_t line = (tcon_map[(TCON_DEBUG_INFO_REG+2)/2]) & 0x3ff;
+			munmap(tcon_map,TCON_DEBUG_INFO_REG+4);
+			if ((line<5)||(line>=245)) {
+				pthread_mutex_lock(&flip_mx);
+				debe_map[DEBE_LAY3_FB_ADDR_REG/4] = fb_addr + (flip_flag * 320*240*16);
+				flip_flag ^= 1;
+				flip_req = (pthread_cond_t)PTHREAD_COND_INITIALIZER;
+				pthread_mutex_unlock(&flip_mx);
+				break;
+			}
+			usleep((245-line)*56);	//(1000000/60/286));
+		}
+	}
+}
+
+// call in SDL_VideoInit()
+void FB_Flip_prepare() {
+	fb0_fd = open("/dev/fb0", O_RDWR);
+	fb0_map = (uint8_t*)mmap(0, 320*480*2, PROT_WRITE, MAP_SHARED, fb0_fd, 0);
+	mem_fd = open("/dev/mem", O_RDWR);
+	debe_map = (uint32_t*)mmap(0, 0x1000, PROT_READ | PROT_WRITE, MAP_SHARED, mem_fd, 0x01e60000);	// DEBE
+	fb_addr = debe_map[DEBE_LAY3_FB_ADDR_REG/4];
+	flip_flag = 1;
+
+	flip_mx = (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER;
+	flip_req = (pthread_cond_t)PTHREAD_COND_INITIALIZER;
+	pthread_create(&flip_pt, NULL, FB_FlipThread, NULL);
+}
+
+// call in SDL_VideoQuit()
+void FB_Flip_finish() {
+	if (flip_pt>0) {
+		pthread_cancel(flip_pt);
+		pthread_join(flip_pt,NULL);
+		flip_pt = 0;
+	}
+	if (debe_map>0) {
+		debe_map[DEBE_LAY3_FB_ADDR_REG/4] = fb_addr;
+		munmap(debe_map,0x1000);
+		debe_map = 0;
+	}
+	if (mem_fd>0) {
+		close(mem_fd);
+		mem_fd = 0;
+	}
+	if (fb0_map>0) {
+		// wait for vsync to avoid flicker when entering the menu
+		struct fb_var_screeninfo fbvar;
+		ioctl(fb0_fd, FBIOGET_VSCREENINFO, &fbvar);
+		ioctl(fb0_fd, FBIOPAN_DISPLAY, &fbvar);
+		memset(fb0_map + 320*240*2,0,320*240*2); // clear screen2 only
+		munmap(fb0_map,320*480*2);
+		fb0_map = 0;
+	}
+	if (fb0_fd>0) {
+		close(fb0_fd);
+		fb0_fd = 0;
+	}
+}
+
+// replaces SDL_Flip
+int SDL_Flip(SDL_Surface* screen) {
+	pthread_mutex_lock(&flip_mx);
+	uint8_t* src = (uint8_t*)screen->pixels;
+	uint8_t* dst = (uint8_t*)fb0_map + (flip_flag * 320*240*2);
+	memcpy(dst,src,320*240*2);
+	pthread_cond_signal(&flip_req);
+	pthread_mutex_unlock(&flip_mx);
+	return(0);
+}
+
 /* Available video drivers */
 static VideoBootStrap *bootstrap[] = {
 #if SDL_VIDEO_DRIVER_QUARTZ
@@ -284,6 +386,8 @@ int SDL_VideoInit (const char *driver_name, Uint32 flags)
 		return(-1);
 	}
 	SDL_CursorInit(flags & SDL_INIT_EVENTTHREAD);
+
+	FB_Flip_prepare(); // TRIMUI
 
 	/* We're ready to go! */
 	return(0);
@@ -587,6 +691,8 @@ static void SDL_CreateShadowSurface(int depth)
  */
 SDL_Surface * SDL_SetVideoMode (int width, int height, int bpp, Uint32 flags)
 {
+	flags &= ~(SDL_HWSURFACE|SDL_DOUBLEBUF|SDL_TRIPLEBUF);
+	
 	SDL_VideoDevice *video, *this;
 	SDL_Surface *prev_mode, *mode;
 	int video_w;
@@ -1107,56 +1213,56 @@ void SDL_UpdateRects (SDL_Surface *screen, int numrects, SDL_Rect *rects)
 /*
  * Performs hardware double buffering, if possible, or a full update if not.
  */
-int SDL_Flip(SDL_Surface *screen)
-{
-	SDL_VideoDevice *video = current_video;
-	/* Copy the shadow surface to the video surface */
-	if ( screen == SDL_ShadowSurface ) {
-		SDL_Rect rect;
-		SDL_Palette *pal = screen->format->palette;
-		SDL_Color *saved_colors = NULL;
-		if ( pal && !(SDL_VideoSurface->flags & SDL_HWPALETTE) ) {
-			/* simulated 8bpp, use correct physical palette */
-			saved_colors = pal->colors;
-			if ( video->gammacols ) {
-				/* gamma-corrected palette */
-				pal->colors = video->gammacols;
-			} else if ( video->physpal ) {
-				/* physical palette different from logical */
-				pal->colors = video->physpal->colors;
-			}
-		}
-
-		rect.x = 0;
-		rect.y = 0;
-		rect.w = screen->w;
-		rect.h = screen->h;
-		if ( SHOULD_DRAWCURSOR(SDL_cursorstate) ) {
-			SDL_LockCursor();
-			SDL_DrawCursor(SDL_ShadowSurface);
-			SDL_LowerBlit(SDL_ShadowSurface, &rect,
-					SDL_VideoSurface, &rect);
-			SDL_EraseCursor(SDL_ShadowSurface);
-			SDL_UnlockCursor();
-		} else {
-			SDL_LowerBlit(SDL_ShadowSurface, &rect,
-					SDL_VideoSurface, &rect);
-		}
-		if ( saved_colors ) {
-			pal->colors = saved_colors;
-		}
-
-		/* Fall through to video surface update */
-		screen = SDL_VideoSurface;
-	}
-	if ( (screen->flags & SDL_DOUBLEBUF) == SDL_DOUBLEBUF ) {
-		SDL_VideoDevice *this  = current_video;
-		return(video->FlipHWSurface(this, SDL_VideoSurface));
-	} else {
-		SDL_UpdateRect(screen, 0, 0, 0, 0);
-	}
-	return(0);
-}
+// int SDL_Flip(SDL_Surface *screen)
+// {
+// 	SDL_VideoDevice *video = current_video;
+// 	/* Copy the shadow surface to the video surface */
+// 	if ( screen == SDL_ShadowSurface ) {
+// 		SDL_Rect rect;
+// 		SDL_Palette *pal = screen->format->palette;
+// 		SDL_Color *saved_colors = NULL;
+// 		if ( pal && !(SDL_VideoSurface->flags & SDL_HWPALETTE) ) {
+// 			/* simulated 8bpp, use correct physical palette */
+// 			saved_colors = pal->colors;
+// 			if ( video->gammacols ) {
+// 				/* gamma-corrected palette */
+// 				pal->colors = video->gammacols;
+// 			} else if ( video->physpal ) {
+// 				/* physical palette different from logical */
+// 				pal->colors = video->physpal->colors;
+// 			}
+// 		}
+// 
+// 		rect.x = 0;
+// 		rect.y = 0;
+// 		rect.w = screen->w;
+// 		rect.h = screen->h;
+// 		if ( SHOULD_DRAWCURSOR(SDL_cursorstate) ) {
+// 			SDL_LockCursor();
+// 			SDL_DrawCursor(SDL_ShadowSurface);
+// 			SDL_LowerBlit(SDL_ShadowSurface, &rect,
+// 					SDL_VideoSurface, &rect);
+// 			SDL_EraseCursor(SDL_ShadowSurface);
+// 			SDL_UnlockCursor();
+// 		} else {
+// 			SDL_LowerBlit(SDL_ShadowSurface, &rect,
+// 					SDL_VideoSurface, &rect);
+// 		}
+// 		if ( saved_colors ) {
+// 			pal->colors = saved_colors;
+// 		}
+// 
+// 		/* Fall through to video surface update */
+// 		screen = SDL_VideoSurface;
+// 	}
+// 	if ( (screen->flags & SDL_DOUBLEBUF) == SDL_DOUBLEBUF ) {
+// 		SDL_VideoDevice *this  = current_video;
+// 		return(video->FlipHWSurface(this, SDL_VideoSurface));
+// 	} else {
+// 		SDL_UpdateRect(screen, 0, 0, 0, 0);
+// 	}
+// 	return(0);
+// }
 
 static void SetPalette_logical(SDL_Surface *screen, SDL_Color *colors,
 			       int firstcolor, int ncolors)
@@ -1348,6 +1454,8 @@ int SDL_SetColors(SDL_Surface *screen, SDL_Color *colors, int firstcolor,
  */
 void SDL_VideoQuit (void)
 {
+	FB_Flip_finish(); // TRIMUI
+	
 	SDL_Surface *ready_to_go;
 
 	if ( current_video ) {
