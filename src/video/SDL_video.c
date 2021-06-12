@@ -122,46 +122,52 @@ static void FB_Flip_finish() {
 	}
 }
 
+#define BAT_CHECK_INTERVAL_MS 10000
+static unsigned long bat_last_check = 0;
+static int bat_low = 0;
 int SDL_Flip(SDL_Surface* screen) {
 	pthread_mutex_lock(&flip_mx);
 	uint8_t* src = (uint8_t*)screen->pixels;
 	uint8_t* dst = (uint8_t*)fb0_map + (flip_flag * 320*240*2);
 	memcpy(dst,src,320*240*2);
 	
-	int bat_draw = 0;
-	const char *trimui_show = SDL_getenv("trimui_show");
-	if (!trimui_show || strncmp(trimui_show,"no",2)==0) {
-		int charge = -1;
-		FILE* file = fopen("/sys/devices/soc/1c23400.battery/adc", "r");
-		if (file!=NULL) {
-			fscanf(file, "%i", &charge);
-			fclose(file);
+	// battery level
+	if (!screen->unused1) { // trimui_show=no
+		unsigned long now = SDL_GetTicks();
+		if (!bat_last_check || now-bat_last_check>=BAT_CHECK_INTERVAL_MS) {
+			bat_last_check = now;
+			int charge = -1;
+			FILE* file = fopen("/sys/devices/soc/1c23400.battery/adc", "r");
+			if (file!=NULL) {
+				fscanf(file, "%i", &charge);
+				fclose(file);
+			}
+			bat_low = charge<41;
 		}
 		
-		bat_draw = charge<41;
-	}
-	
-	if (bat_draw) {
-		uint16_t red = 0xF920;
-		uint16_t* dst_px = (uint16_t*)dst;
-		dst_px += (320 * 9) + 300;
-		int x,y;
-		for (y=0; y<16; y++) {
-			if (y==0) {
-				for (x=3; x<7; x++) {
-					*(dst_px+x) = red;
+		if (bat_low) {
+			// blit icon
+			uint16_t red = 0xF920;
+			uint16_t* dst_px = (uint16_t*)dst;
+			dst_px += (320 * 9) + 300;
+			int x,y;
+			for (y=0; y<16; y++) {
+				if (y==0) {
+					for (x=3; x<7; x++) {
+						*(dst_px+x) = red;
+					}
 				}
-			}
-			else if (y==1 || y==15) {
-				for (x=0; x<10; x++) {
-					*(dst_px+x) = red;
+				else if (y==1 || y==15) {
+					for (x=0; x<10; x++) {
+						*(dst_px+x) = red;
+					}
 				}
+				else {
+					*(dst_px) = red;
+					*(dst_px+9) = red;
+				}
+				dst_px += 320;
 			}
-			else {
-				*(dst_px) = red;
-				*(dst_px+9) = red;
-			}
-			dst_px += 320;
 		}
 	}
 	
@@ -1067,6 +1073,7 @@ SDL_Surface * SDL_SetVideoMode (int width, int height, int bpp, Uint32 flags)
 	video->info.current_h = SDL_VideoSurface->h;
 
 	/* We're done! */
+	SDL_PublicSurface->unused1 = 0;
 	return(SDL_PublicSurface);
 }
 
