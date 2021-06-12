@@ -122,27 +122,25 @@ static void FB_Flip_finish() {
 	}
 }
 
-static int getBatteryLevel(void) {
-	int value = -1;
-	FILE* file = fopen("/sys/devices/soc/1c23400.battery/adc", "r");
-	if (file!=NULL) {
-		fscanf(file, "%i", &value);
-		fclose(file);
-	}
-	return value;
-}
-
 int SDL_Flip(SDL_Surface* screen) {
-	int bat_draw = 0;
-	const char *trimui_show = SDL_getenv("trimui_show");
-	if (!trimui_show || strncmp(trimui_show,"no",2)==0) {
-		bat_draw = getBatteryLevel()<41;
-	}
-	
 	pthread_mutex_lock(&flip_mx);
 	uint8_t* src = (uint8_t*)screen->pixels;
 	uint8_t* dst = (uint8_t*)fb0_map + (flip_flag * 320*240*2);
 	memcpy(dst,src,320*240*2);
+	
+	int bat_draw = 0;
+	const char *trimui_show = SDL_getenv("trimui_show");
+	if (!trimui_show || strncmp(trimui_show,"no",2)==0) {
+		int charge = -1;
+		FILE* file = fopen("/sys/devices/soc/1c23400.battery/adc", "r");
+		if (file!=NULL) {
+			fscanf(file, "%i", &charge);
+			fclose(file);
+		}
+		
+		bat_draw = charge<41;
+	}
+	
 	if (bat_draw) {
 		uint16_t red = 0xF920;
 		uint16_t* dst_px = (uint16_t*)dst;
@@ -166,6 +164,7 @@ int SDL_Flip(SDL_Surface* screen) {
 			dst_px += 320;
 		}
 	}
+	
 	pthread_cond_signal(&flip_req);
 	pthread_mutex_unlock(&flip_mx);
 	
