@@ -134,19 +134,9 @@ static int getBatteryLevel(void) {
 
 int SDL_Flip(SDL_Surface* screen) {
 	int bat_draw = 0;
-	
 	const char *trimui_show = SDL_getenv("trimui_show");
 	if (!trimui_show || strncmp(trimui_show,"no",2)==0) {
 		bat_draw = getBatteryLevel()<41;
-	}
-	
-	if (bat_draw) {
-		Uint32 r = SDL_MapRGB(screen->format, 255,0,0);
-		SDL_FillRect(screen, &(SDL_Rect){300+3,	10-1,	 4,	 1}, r); // cap
-		SDL_FillRect(screen, &(SDL_Rect){300,	10,		10,	 1}, r); // top
-		SDL_FillRect(screen, &(SDL_Rect){300,	10+1,	 1,	13}, r); // left
-		SDL_FillRect(screen, &(SDL_Rect){300+9,	10+1,	 1,	13}, r); // right
-		SDL_FillRect(screen, &(SDL_Rect){300,	10+14,	10,	 1}, r); // bottom
 	}
 	
 	pthread_mutex_lock(&flip_mx);
@@ -154,7 +144,27 @@ int SDL_Flip(SDL_Surface* screen) {
 	uint8_t* dst = (uint8_t*)fb0_map + (flip_flag * 320*240*2);
 	memcpy(dst,src,320*240*2);
 	if (bat_draw) {
-		// TODO: can we just memset red pixels to dst?
+		uint16_t red = 0xF920;
+		uint16_t* dst_px = (uint16_t*)dst;
+		dst_px += (320 * 9) + 300;
+		int x,y;
+		for (y=0; y<16; y++) {
+			if (y==0) {
+				for (x=3; x<7; x++) {
+					*(dst_px+x) = red;
+				}
+			}
+			else if (y==1 || y==15) {
+				for (x=0; x<10; x++) {
+					*(dst_px+x) = red;
+				}
+			}
+			else {
+				*(dst_px) = red;
+				*(dst_px+9) = red;
+			}
+			dst_px += 320;
+		}
 	}
 	pthread_cond_signal(&flip_req);
 	pthread_mutex_unlock(&flip_mx);
