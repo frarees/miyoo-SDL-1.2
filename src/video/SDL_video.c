@@ -42,16 +42,16 @@
 #include <linux/fb.h>
 #include <pthread.h>
 
-int			fb0_fd = 0;
-uint8_t*	fb0_map = 0;
-uint32_t	flip_flag;
+int				fb0_fd = 0;
+uint8_t*		fb0_map = 0;
+uint32_t		flip_flag;
 
-int			mem_fd = 0;
-uint32_t*	debe_map = 0;
-uint32_t	fb_addr;
-#define		DEBE_LAY3_FB_ADDR_REG	0x85C
-#define		TCON_DEBUG_INFO_REG	0xFC
-pthread_t	flip_pt = 0;
+int				mem_fd = 0;
+uint32_t*		debe_map = 0;
+uint32_t		fb_addr;
+#define			DEBE_LAY3_FB_ADDR_REG	0x85C
+#define			TCON_DEBUG_INFO_REG	0xFC
+pthread_t		flip_pt = 0;
 pthread_mutex_t	flip_mx;
 pthread_cond_t	flip_req;
 
@@ -78,7 +78,7 @@ static void* FB_FlipThread(void* param) {
 }
 
 // call in SDL_VideoInit()
-void FB_Flip_prepare() {
+static void FB_Flip_prepare() {
 	fb0_fd = open("/dev/fb0", O_RDWR);
 	fb0_map = (uint8_t*)mmap(0, 320*480*2, PROT_WRITE, MAP_SHARED, fb0_fd, 0);
 	mem_fd = open("/dev/mem", O_RDWR);
@@ -92,7 +92,7 @@ void FB_Flip_prepare() {
 }
 
 // call in SDL_VideoQuit()
-void FB_Flip_finish() {
+static void FB_Flip_finish() {
 	if (flip_pt>0) {
 		pthread_cancel(flip_pt);
 		pthread_join(flip_pt,NULL);
@@ -122,14 +122,43 @@ void FB_Flip_finish() {
 	}
 }
 
-// replaces SDL_Flip
+static int getBatteryLevel(void) {
+	int value = -1;
+	FILE* file = fopen("/sys/devices/soc/1c23400.battery/adc", "r");
+	if (file!=NULL) {
+		fscanf(file, "%i", &value);
+		fclose(file);
+	}
+	return value;
+}
+
 int SDL_Flip(SDL_Surface* screen) {
+	int bat_draw = 0;
+	
+	const char *trimui_show = SDL_getenv("trimui_show");
+	if (!trimui_show || strncmp(trimui_show,"no",2)==0) {
+		bat_draw = getBatteryLevel()<41;
+	}
+	
+	if (bat_draw) {
+		Uint32 r = SDL_MapRGB(screen->format, 255,0,0);
+		SDL_FillRect(screen, &(SDL_Rect){300+3,	10-1,	 4,	 1}, r); // cap
+		SDL_FillRect(screen, &(SDL_Rect){300,	10,		10,	 1}, r); // top
+		SDL_FillRect(screen, &(SDL_Rect){300,	10+1,	 1,	13}, r); // left
+		SDL_FillRect(screen, &(SDL_Rect){300+9,	10+1,	 1,	13}, r); // right
+		SDL_FillRect(screen, &(SDL_Rect){300,	10+14,	10,	 1}, r); // bottom
+	}
+	
 	pthread_mutex_lock(&flip_mx);
 	uint8_t* src = (uint8_t*)screen->pixels;
 	uint8_t* dst = (uint8_t*)fb0_map + (flip_flag * 320*240*2);
 	memcpy(dst,src,320*240*2);
+	if (bat_draw) {
+		// TODO: can we just memset red pixels to dst?
+	}
 	pthread_cond_signal(&flip_req);
 	pthread_mutex_unlock(&flip_mx);
+	
 	return(0);
 }
 
