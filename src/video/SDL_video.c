@@ -45,6 +45,7 @@
 int				fb0_fd = 0;
 uint8_t*		fb0_map = 0;
 uint32_t		flip_flag;
+uint32_t		last_draw;
 
 int				mem_fd = 0;
 uint32_t*		debe_map = 0;
@@ -85,6 +86,7 @@ static void FB_Flip_prepare() {
 	debe_map = (uint32_t*)mmap(0, 0x1000, PROT_READ | PROT_WRITE, MAP_SHARED, mem_fd, 0x01e60000);	// DEBE
 	fb_addr = debe_map[DEBE_LAY3_FB_ADDR_REG/4];
 	flip_flag = 1;
+	last_draw = 0;
 
 	flip_mx = (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER;
 	flip_req = (pthread_cond_t)PTHREAD_COND_INITIALIZER;
@@ -112,6 +114,7 @@ static void FB_Flip_finish() {
 		struct fb_var_screeninfo fbvar;
 		ioctl(fb0_fd, FBIOGET_VSCREENINFO, &fbvar);
 		ioctl(fb0_fd, FBIOPAN_DISPLAY, &fbvar);
+		if (last_draw == 1) memcpy(fb0_map, fb0_map + 320*240*2, 320*240*2);
 		memset(fb0_map + 320*240*2,0,320*240*2); // clear screen2 only
 		munmap(fb0_map,320*480*2);
 		fb0_map = 0;
@@ -130,6 +133,7 @@ int SDL_Flip(SDL_Surface* screen) {
 	uint8_t* src = (uint8_t*)screen->pixels;
 	uint8_t* dst = (uint8_t*)fb0_map + (flip_flag * 320*240*2);
 	memcpy(dst,src,320*240*2);
+	last_draw = flip_flag;
 	
 	// battery level
 	if (!screen->unused1) { // trimui_show=no
