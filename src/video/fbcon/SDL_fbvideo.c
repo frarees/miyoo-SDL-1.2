@@ -2039,8 +2039,10 @@ static int FB_SetColors(_THIS, int firstcolor, int ncolors, SDL_Color *colors)
 */
 static void FB_VideoQuit(_THIS)
 {
+	puts("[ FB_VideoQuit ]");
+	
 	int i, j;
-	const char *dontClearPixels = SDL_getenv("SDL_FBCON_DONT_CLEAR");
+	const char *dontClearPixels = "1"; // SDL_getenv("SDL_FBCON_DONT_CLEAR"); // TRIMUI, no effect
 
 #if !SDL_THREADS_DISABLED
 	FB_TripleBufferQuit(this);
