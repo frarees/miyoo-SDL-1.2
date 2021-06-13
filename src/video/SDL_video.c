@@ -881,7 +881,7 @@ SDL_Surface * SDL_SetVideoMode (int width, int height, int bpp, Uint32 flags)
 		video->offset_y = 0;
 		mode->offset = 0;
 		SDL_SetClipRect(mode, NULL);
-		SDL_ClearSurface(mode);
+		// SDL_ClearSurface(mode);
 
 		/* Now adjust the offsets to match the desired mode */
 		video->offset_x = (mode->w-width)/2;
