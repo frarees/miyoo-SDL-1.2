@@ -808,8 +808,8 @@ static int FB_VideoInit(_THIS, SDL_PixelFormat *vformat)
 	}
 	if ( FB_OpenMouse(this) < 0 ) {
 		const char *sdl_nomouse;
-
-		 // TRIMUI
+		
+		// TRIMUI
 		sdl_nomouse = "1"; // SDL_getenv("SDL_NOMOUSE");
 		if ( ! sdl_nomouse ) {
 			SDL_SetError("Unable to open mouse");

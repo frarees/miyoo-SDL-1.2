@@ -593,9 +593,7 @@ static void SDL_ConvertCursorSave(SDL_Surface *screen, int w, int h)
 }
 
 void SDL_DrawCursorNoLock(SDL_Surface *screen)
-{
-	return; // TRIMUI
-	
+{	
 	SDL_Rect area;
 
 	/* Get the mouse rectangle, clipped to the screen */
@@ -641,8 +639,6 @@ void SDL_DrawCursorNoLock(SDL_Surface *screen)
 
 void SDL_DrawCursor(SDL_Surface *screen)
 {
-	return; // TRIMUI
-	
 	/* Lock the screen if necessary */
 	if ( screen == NULL ) {
 		return;

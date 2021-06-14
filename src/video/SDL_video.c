@@ -433,7 +433,7 @@ int SDL_VideoInit (const char *driver_name, Uint32 flags)
 		SDL_VideoQuit();
 		return(-1);
 	}
-	SDL_CursorInit(flags & SDL_INIT_EVENTTHREAD);
+	// SDL_CursorInit(flags & SDL_INIT_EVENTTHREAD); // TRIMUI
 
 	FB_Flip_prepare(); // TRIMUI
 
@@ -1407,7 +1407,7 @@ static int SetPalette_physical(SDL_Surface *screen,
 			*/
 			;
 		}
-		SDL_CursorPaletteChanged();
+		// SDL_CursorPaletteChanged(); // TRIMUI
 	}
 	return gotall;
 }
@@ -1518,7 +1518,7 @@ void SDL_VideoQuit (void)
 		if ( SDL_PublicSurface ) {
 			SDL_PublicSurface = NULL;
 		}
-		SDL_CursorQuit();
+		// SDL_CursorQuit(); // TRIMUI
 
 		/* Just in case... */
 		SDL_WM_GrabInputOff();
