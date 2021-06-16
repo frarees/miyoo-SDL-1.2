@@ -81,7 +81,7 @@ static void* FB_FlipThread(void* param) {
 // call in SDL_VideoInit()
 static void FB_Flip_prepare() {
 	fb0_fd = open("/dev/fb0", O_RDWR);
-	fb0_map = (uint8_t*)mmap(0, 320*480*2, PROT_WRITE, MAP_SHARED, fb0_fd, 0);
+	fb0_map = (uint8_t*)mmap(0, 320*480*2, PROT_READ | PROT_WRITE, MAP_SHARED, fb0_fd, 0);
 	mem_fd = open("/dev/mem", O_RDWR);
 	debe_map = (uint32_t*)mmap(0, 0x1000, PROT_READ | PROT_WRITE, MAP_SHARED, mem_fd, 0x01e60000);	// DEBE
 	fb_addr = debe_map[DEBE_LAY3_FB_ADDR_REG/4];
