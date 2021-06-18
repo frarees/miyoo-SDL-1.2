@@ -118,6 +118,56 @@ SDL_AudioDevice *current_audio = NULL;
 int SDL_AudioInit(const char *driver_name);
 void SDL_AudioQuit(void);
 
+// TRIMUI
+#include <unistd.h>
+static int USB_using = -1;
+static int USB_found =  0;
+static int USB_closed =  0;
+static void USB_PollState(void) {
+	// TODO: throttle this
+	USB_found = (access("/dev/dsp1", R_OK | W_OK) == 0);
+}
+
+static void USB_SetState(void) {
+	if (USB_using!=USB_found) {
+		if (USB_found) SDL_putenv("AUDIODEV=/dev/dsp1");
+		else SDL_putenv("AUDIODEV=/dev/dsp");
+		USB_using = USB_found;
+	}
+}
+static void USB_UpdateState(SDL_AudioDevice* audio) {
+	// lost usb
+	if (USB_using && !audio->enabled) {
+		// headphone write just failed
+		// force audio back to the speaker
+		USB_using = -1;
+		USB_found =  0;
+	}
+	else if (audio->enabled && !USB_using) {
+		// running on speaker
+		USB_PollState();
+		if (USB_using!=USB_found) {
+			// detected headphones
+			audio->enabled = 0;
+		}
+	}
+}
+static void USB_StateChanged(SDL_AudioDevice* audio) {
+	if (!USB_closed && USB_using!=USB_found) {
+		// TODO: restoring status might be crashy...
+		// SDL_audiostatus status = SDL_GetAudioStatus();
+		SDL_AudioSpec spec;
+		SDL_memcpy(&spec, &audio->spec, sizeof(audio->spec));
+		// if (status==SDL_AUDIO_PLAYING)
+			SDL_PauseAudio(1);
+		SDL_CloseAudio();
+		SDL_InitSubSystem(SDL_INIT_AUDIO);
+		SDL_OpenAudio(&spec, NULL);
+		// if (status==SDL_AUDIO_PLAYING)
+			SDL_PauseAudio(0);
+	}
+}
+
 /* The general mixing thread function */
 int SDLCALL SDL_RunAudio(void *audiop)
 {
@@ -190,20 +240,24 @@ int SDLCALL SDL_RunAudio(void *audiop)
 		if ( stream != audio->fake_stream ) {
 			audio->PlayAudio(audio);
 		}
-
+		
 		/* Wait for an audio buffer to become available */
 		if ( stream == audio->fake_stream ) {
 			SDL_Delay((audio->spec.samples*1000)/audio->spec.freq);
 		} else {
 			audio->WaitAudio(audio);
 		}
+		
+		USB_UpdateState(audio);
 	}
 
 	/* Wait for the audio to drain.. */
 	if ( audio->WaitDone ) {
 		audio->WaitDone(audio);
 	}
-
+	
+	USB_StateChanged(audio);
+	
 	return(0);
 }
 
@@ -270,6 +324,10 @@ static Uint16 SDL_ParseAudioFormat(const char *string)
 
 int SDL_AudioInit(const char *driver_name)
 {
+	USB_closed = 0;
+	USB_PollState();
+	USB_SetState();
+	
 	SDL_AudioDevice *audio;
 	int i = 0, idx;
 
@@ -360,6 +418,7 @@ int SDL_AudioInit(const char *driver_name)
 			current_audio->UnlockAudio = SDL_UnlockAudio_Default;
 		}
 	}
+	
 	return(0);
 }
 
@@ -599,6 +658,7 @@ void SDL_CloseAudio (void)
 
 void SDL_AudioQuit(void)
 {
+	USB_closed = 1; // prevents restarting audio in USB_StateChanged()
 	SDL_AudioDevice *audio = current_audio;
 
 	if ( audio ) {
