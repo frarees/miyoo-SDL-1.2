@@ -122,9 +122,9 @@ void SDL_AudioQuit(void);
 #include <unistd.h>
 static int USB_using = -1;
 static int USB_found =  0;
-static int USB_closed =  0;
+static int USB_quitting =  0;
 static void USB_PollState(void) {
-	// TODO: throttle this
+	// TODO: throttle this?
 	USB_found = (access("/dev/dsp1", R_OK | W_OK) == 0);
 }
 
@@ -153,8 +153,8 @@ static void USB_UpdateState(SDL_AudioDevice* audio) {
 	}
 }
 static void USB_StateChanged(SDL_AudioDevice* audio) {
-	if (!USB_closed && USB_using!=USB_found) {
-		// TODO: restoring status might be crashy...
+	if (!USB_quitting && USB_using!=USB_found) {
+		// TODO: restoring status might be crashy...needs testing
 		// SDL_audiostatus status = SDL_GetAudioStatus();
 		SDL_AudioSpec spec;
 		SDL_memcpy(&spec, &audio->spec, sizeof(audio->spec));
@@ -324,7 +324,7 @@ static Uint16 SDL_ParseAudioFormat(const char *string)
 
 int SDL_AudioInit(const char *driver_name)
 {
-	USB_closed = 0;
+	USB_quitting = 0;
 	USB_PollState();
 	USB_SetState();
 	
@@ -658,7 +658,7 @@ void SDL_CloseAudio (void)
 
 void SDL_AudioQuit(void)
 {
-	USB_closed = 1; // prevents restarting audio in USB_StateChanged()
+	USB_quitting = 1; // prevents restarting audio in USB_StateChanged()
 	SDL_AudioDevice *audio = current_audio;
 
 	if ( audio ) {
