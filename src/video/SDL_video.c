@@ -51,12 +51,18 @@ int				mem_fd = 0;
 uint32_t*		debe_map = 0;
 uint32_t		fb_addr;
 #define			DEBE_LAY3_FB_ADDR_REG	0x85C
+#define			TCON0_BASIC_TIMING_REG1	0x4C
+#define			TCON0_BASIC_TIMING_REG2	0x50
 #define			TCON_DEBUG_INFO_REG	0xFC
 pthread_t		flip_pt = 0;
 pthread_mutex_t	flip_mx;
 pthread_cond_t	flip_req;
+uint16_t		vbp;
+uint32_t		sleepns_mul;
+struct fb_var_screeninfo fbvar;
 
 static void* FB_FlipThread(void* param) {
+	struct timespec	sleeptime = {0,0};
 	while(1) {
 		pthread_mutex_lock(&flip_mx);
 		pthread_cond_wait(&flip_req,&flip_mx);
@@ -65,7 +71,7 @@ static void* FB_FlipThread(void* param) {
 			uint16_t* tcon_map = (uint16_t*)mmap(0, TCON_DEBUG_INFO_REG+4, PROT_READ, MAP_PRIVATE, mem_fd, 0x01c0c000);	// TCON
 			uint16_t line = (tcon_map[(TCON_DEBUG_INFO_REG+2)/2]) & 0x3ff;
 			munmap(tcon_map,TCON_DEBUG_INFO_REG+4);
-			if ((line<5)||(line>=245)) {
+			if ((line<vbp)||(line>=240+vbp)) {
 				pthread_mutex_lock(&flip_mx);
 				debe_map[DEBE_LAY3_FB_ADDR_REG/4] = fb_addr + (flip_flag * 320*240*16);
 				flip_flag ^= 1;
@@ -73,24 +79,38 @@ static void* FB_FlipThread(void* param) {
 				pthread_mutex_unlock(&flip_mx);
 				break;
 			}
-			usleep((245-line)*56);	//(1000000/60/286));
+			sleeptime.tv_nsec = (240+vbp-line)*sleepns_mul;
+			nanosleep(&sleeptime,NULL);
 		}
 	}
+	return NULL;
 }
 
 // call in SDL_VideoInit()
 static void FB_Flip_prepare() {
-	fb0_fd = open("/dev/fb0", O_RDWR);
-	fb0_map = (uint8_t*)mmap(0, 320*480*2, PROT_READ | PROT_WRITE, MAP_SHARED, fb0_fd, 0);
-	mem_fd = open("/dev/mem", O_RDWR);
-	debe_map = (uint32_t*)mmap(0, 0x1000, PROT_READ | PROT_WRITE, MAP_SHARED, mem_fd, 0x01e60000);	// DEBE
-	fb_addr = debe_map[DEBE_LAY3_FB_ADDR_REG/4];
-	flip_flag = 1;
-	last_draw = 0;
+	if (fb0_fd == 0) {
+		fb0_fd = open("/dev/fb0", O_RDWR);
+		fb0_map = (uint8_t*)mmap(0, 320*480*2, PROT_READ | PROT_WRITE, MAP_SHARED, fb0_fd, 0);
+		ioctl(fb0_fd, FBIOGET_VSCREENINFO, &fbvar);
+		fbvar.xoffset = fbvar.yoffset = 0;
+		ioctl(fb0_fd, FBIOPAN_DISPLAY, &fbvar); // run twice to wait for PAN to be applied
+		ioctl(fb0_fd, FBIOPAN_DISPLAY, &fbvar);	//
+		mem_fd = open("/dev/mem", O_RDWR);
+		debe_map = (uint32_t*)mmap(0, 0x1000, PROT_READ | PROT_WRITE, MAP_SHARED, mem_fd, 0x01e60000);	// DEBE
+		fb_addr = debe_map[DEBE_LAY3_FB_ADDR_REG/4];
+		flip_flag = 1;
+		last_draw = 0;
 
-	flip_mx = (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER;
-	flip_req = (pthread_cond_t)PTHREAD_COND_INITIALIZER;
-	pthread_create(&flip_pt, NULL, FB_FlipThread, NULL);
+		uint16_t* tcon_map = (uint16_t*)mmap(0, TCON0_BASIC_TIMING_REG2+4, PROT_READ, MAP_PRIVATE, mem_fd, 0x01c0c000);	// TCON
+		uint16_t ht = (tcon_map[(TCON0_BASIC_TIMING_REG1+2)/2])+1;
+		uint16_t vt = (tcon_map[(TCON0_BASIC_TIMING_REG2+2)/2])/2;
+		vbp = (tcon_map[(TCON0_BASIC_TIMING_REG2)/2])+1;
+		munmap(tcon_map,TCON0_BASIC_TIMING_REG2+4);
+		sleepns_mul = 1000000000 / (70000 / ht) / vt;
+		flip_mx = (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER;
+		flip_req = (pthread_cond_t)PTHREAD_COND_INITIALIZER;
+		pthread_create(&flip_pt, NULL, FB_FlipThread, NULL);
+	}
 }
 
 // call in SDL_VideoQuit()
@@ -110,9 +130,7 @@ static void FB_Flip_finish() {
 		mem_fd = 0;
 	}
 	if (fb0_map>0) {
-		// wait for vsync to avoid flicker when entering the menu
-		struct fb_var_screeninfo fbvar;
-		ioctl(fb0_fd, FBIOGET_VSCREENINFO, &fbvar);
+		// wait for vsync to avoid flicker
 		ioctl(fb0_fd, FBIOPAN_DISPLAY, &fbvar);
 		if (last_draw == 1) memcpy(fb0_map, fb0_map + 320*240*2, 320*240*2);
 		memset(fb0_map + 320*240*2,0,320*240*2); // clear screen2 only
