@@ -757,7 +757,7 @@ static void SDL_CreateShadowSurface(int depth)
  */
 SDL_Surface * SDL_SetVideoMode (int width, int height, int bpp, Uint32 flags)
 {
-	flags &= ~(SDL_HWSURFACE|SDL_DOUBLEBUF|SDL_TRIPLEBUF);
+	flags &= ~(SDL_HWSURFACE|SDL_DOUBLEBUF|SDL_TRIPLEBUF); // TRIMUI
 	
 	SDL_VideoDevice *video, *this;
 	SDL_Surface *prev_mode, *mode;
