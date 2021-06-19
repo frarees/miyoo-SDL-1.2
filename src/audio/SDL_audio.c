@@ -124,8 +124,9 @@ static int USB_using = -1;
 static int USB_found =  0;
 static int USB_quitting =  0;
 static void USB_PollState(void) {
-	// TODO: throttle this?
-	USB_found = (access("/dev/dsp1", R_OK | W_OK) == 0);
+	static int count = 0;
+	if (count++==0) USB_found = (access("/dev/dsp1", R_OK | W_OK) == 0);
+	if (count>=60) count = 0;
 }
 
 static void USB_SetState(void) {
