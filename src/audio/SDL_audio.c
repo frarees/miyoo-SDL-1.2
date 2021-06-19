@@ -123,10 +123,11 @@ void SDL_AudioQuit(void);
 static int USB_using = -1;
 static int USB_found =  0;
 static int USB_quitting =  0;
+static int USB_count_max;
 static void USB_PollState(void) {
 	static int count = 0;
 	if (count++==0) USB_found = (access("/dev/dsp1", R_OK | W_OK) == 0);
-	if (count>=60) count = 0;
+	if (count>=USB_count_max) count = 0;
 }
 
 static void USB_SetState(void) {
@@ -582,6 +583,8 @@ int SDL_OpenAudio(SDL_AudioSpec *desired, SDL_AudioSpec *obtained)
 		}
 	}
 
+	USB_count_max = audio->spec.freq / audio->spec.samples;
+
 	/* Start the audio thread if necessary */
 	switch (audio->opened) {
 		case  1:
@@ -603,7 +606,7 @@ int SDL_OpenAudio(SDL_AudioSpec *desired, SDL_AudioSpec *obtained)
 			/* The audio is now playing */
 			break;
 	}
-
+	
 	return(0);
 }
 
