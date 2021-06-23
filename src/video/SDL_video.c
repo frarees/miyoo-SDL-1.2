@@ -31,7 +31,7 @@
 #include "../events/SDL_sysevents.h"
 #include "../events/SDL_events_c.h"
 
-// TRIMUI
+/////////////////////////////////////////////////////////// TRIMUI
 #include <sys/mman.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -42,23 +42,23 @@
 #include <linux/fb.h>
 #include <pthread.h>
 
-int				fb0_fd = 0;
-uint8_t*		fb0_map = 0;
-uint32_t		flip_flag;
-uint32_t		last_draw;
+int			fb0_fd = 0;
+uint8_t*	fb0_map;
+uint32_t	flip_flag;
+uint32_t	last_draw;
 
-int				mem_fd = 0;
-uint32_t*		debe_map = 0;
-uint32_t		fb_addr;
-#define			DEBE_LAY3_FB_ADDR_REG	0x85C
-#define			TCON0_BASIC_TIMING_REG1	0x4C
-#define			TCON0_BASIC_TIMING_REG2	0x50
-#define			TCON_DEBUG_INFO_REG	0xFC
-pthread_t		flip_pt = 0;
+int			mem_fd;
+uint32_t*	debe_map;
+uint32_t	fb_addr;
+#define		DEBE_LAY3_FB_ADDR_REG	0x85C
+#define		TCON0_BASIC_TIMING_REG1	0x4C
+#define		TCON0_BASIC_TIMING_REG2	0x50
+#define		TCON_DEBUG_INFO_REG	0xFC
+pthread_t	flip_pt;
 pthread_mutex_t	flip_mx;
 pthread_cond_t	flip_req;
-uint16_t		vbp;
-uint32_t		sleepns_mul;
+uint16_t	vbp;
+uint32_t	sleepns_mul;
 struct fb_var_screeninfo fbvar;
 
 static void* FB_FlipThread(void* param) {
@@ -83,7 +83,7 @@ static void* FB_FlipThread(void* param) {
 			nanosleep(&sleeptime,NULL);
 		}
 	}
-	return NULL;
+	return 0;
 }
 
 // call in SDL_VideoInit()
@@ -116,126 +116,120 @@ static void FB_Flip_prepare() {
 
 // call in SDL_VideoQuit()
 static void FB_Flip_finish() {
-	if (flip_pt>0) {
+	if (fb0_fd>0) {
 		pthread_cancel(flip_pt);
 		pthread_join(flip_pt,NULL);
-		flip_pt = 0;
-	}
-	if (debe_map>0) {
+
 		debe_map[DEBE_LAY3_FB_ADDR_REG/4] = fb_addr;
 		munmap(debe_map,0x1000);
-		debe_map = 0;
-	}
-	if (mem_fd>0) {
 		close(mem_fd);
-		mem_fd = 0;
-	}
-	if (fb0_map>0) {
+
 		// wait for vsync to avoid flicker
 		ioctl(fb0_fd, FBIOPAN_DISPLAY, &fbvar);
 		if (last_draw == 1) memcpy(fb0_map, fb0_map + 320*240*2, 320*240*2);
 		memset(fb0_map + 320*240*2,0,320*240*2); // clear screen2 only
 		munmap(fb0_map,320*480*2);
-		fb0_map = 0;
-	}
-	if (fb0_fd>0) {
 		close(fb0_fd);
-		fb0_fd = 0;
 	}
-}
-
-void SDL_UpdateRects(SDL_Surface *screen, int numrects, SDL_Rect *rects) {
-	pthread_mutex_lock(&flip_mx);
-	uint8_t* src0 = (uint8_t*)screen->pixels;
-	uint8_t* dst0 = (uint8_t*)fb0_map + (flip_flag * 320*240*2);
-	if ((numrects == 1)&&(rects[0].x == 0)&&(rects[0].y == 0)&&
-	    (rects[0].w == screen->w)&&(rects[0].h == screen->h)) {
-		// update entire screen
-		memcpy(dst0,src0,320*240*2);
-	} else {
-		// update partial rects
-		if (last_draw != flip_flag) {
-			// copy recent entire screen first if already flipped
-			uint8_t* src = (uint8_t*)fb0_map + (last_draw * 320*240*2);
-			memcpy(dst0,src,320*240*2);
-		}
-		for (uint32_t i = 0; i < numrects; i++) {
-			int32_t x = rects[i].x;
-			int32_t y = rects[i].y;
-			uint32_t w = rects[i].w;
-			uint32_t h = rects[i].h;
-			if ( (x >= 0) && (y >= 0) && (w != 0) && (h != 0) &&
-			     ((x+w) <= screen->w) && ((y+h) <= screen->h) ) {
-				w *= 2;
-				uint32_t ofs = ( x*2 ) + ( y*320*2 );
-				uint8_t* src = src0 + ofs;
-				uint8_t* dst = dst0 + ofs;
-				uint32_t p = screen->pitch;
-				if ( w == p ) memcpy(dst,src,w*h);
-				else for (; h--; src += p, dst += p) memcpy(dst,src,w);
-			}
-		}
-	}
-	last_draw = flip_flag;
-	pthread_cond_signal(&flip_req);
-	pthread_mutex_unlock(&flip_mx);
+	fb0_fd = 0;
 }
 
 #define BAT_CHECK_INTERVAL_MS 10000
 static unsigned long bat_last_check = 0;
 static int bat_low = 0;
-int SDL_Flip(SDL_Surface* screen) {
-	pthread_mutex_lock(&flip_mx);
-	uint8_t* src = (uint8_t*)screen->pixels;
-	uint8_t* dst = (uint8_t*)fb0_map + (flip_flag * 320*240*2);
-	memcpy(dst,src,320*240*2);
-	last_draw = flip_flag;
-	
+static void FB_ShowBattery(uint16_t *dst_px) {
 	// battery level
-	if (!screen->unused1) { // trimui_show=no
-		unsigned long now = SDL_GetTicks();
-		if (!bat_last_check || now-bat_last_check>=BAT_CHECK_INTERVAL_MS) {
-			bat_last_check = now;
-			int charge = -1;
-			FILE* file = fopen("/sys/devices/soc/1c23400.battery/adc", "r");
-			if (file!=NULL) {
-				fscanf(file, "%i", &charge);
-				fclose(file);
-			}
-			bat_low = charge<41;
+	unsigned long now = SDL_GetTicks();
+	if (!bat_last_check || now-bat_last_check>=BAT_CHECK_INTERVAL_MS) {
+		bat_last_check = now;
+		int charge = -1;
+		FILE* file = fopen("/sys/devices/soc/1c23400.battery/adc", "r");
+		if (file!=NULL) {
+			fscanf(file, "%i", &charge);
+			fclose(file);
 		}
-		
-		if (bat_low) {
-			// blit icon
-			uint16_t red = 0xF920;
-			uint16_t* dst_px = (uint16_t*)dst;
-			dst_px += (320 * 9) + 300;
-			int x,y;
-			for (y=0; y<16; y++) {
-				if (y==0) {
-					for (x=3; x<7; x++) {
-						*(dst_px+x) = red;
-					}
-				}
-				else if (y==1 || y==15) {
-					for (x=0; x<10; x++) {
-						*(dst_px+x) = red;
-					}
-				}
-				else {
-					*(dst_px) = red;
-					*(dst_px+9) = red;
-				}
-				dst_px += 320;
-			}
-		}
+		bat_low = charge<41;
 	}
 	
-	pthread_cond_signal(&flip_req);
-	pthread_mutex_unlock(&flip_mx);
-	
+	if (bat_low) {
+		// blit icon
+		uint16_t red = 0xF920;
+		dst_px += (320 * 9) + 300;
+		int x,y;
+		for (y=0; y<16; y++) {
+			if (y==0) {
+				for (x=3; x<7; x++) {
+					*(dst_px+x) = red;
+				}
+			}
+			else if (y==1 || y==15) {
+				for (x=0; x<10; x++) {
+					*(dst_px+x) = red;
+				}
+			}
+			else {
+				*(dst_px) = red;
+				*(dst_px+9) = red;
+			}
+			dst_px += 320;
+		}
+	}
+}
+
+void SDL_UpdateRects(SDL_Surface *screen, int numrects, SDL_Rect *rects) {
+	if ((fb0_fd>0)&&(screen == SDL_ShadowSurface)) {
+		pthread_mutex_lock(&flip_mx);
+		uint8_t* src0 = (uint8_t*)screen->pixels;
+		uint8_t* dst0 = (uint8_t*)fb0_map + (flip_flag * 320*240*2);
+		if ((numrects == 1)&&(rects[0].x == 0)&&(rects[0].y == 0)&&
+		    (rects[0].w == screen->w)&&(rects[0].h == screen->h)) {
+			// update entire screen
+			memcpy(dst0,src0,320*240*2);
+		} else {
+			// update partial rects
+			if (last_draw != flip_flag) {
+				// copy recent entire screen first if already flipped
+				uint8_t* src = (uint8_t*)fb0_map + (last_draw * 320*240*2);
+				memcpy(dst0,src,320*240*2);
+			}
+			for (uint32_t i = 0; i < numrects; i++) {
+				int32_t x = rects[i].x;
+				int32_t y = rects[i].y;
+				uint32_t w = rects[i].w;
+				uint32_t h = rects[i].h;
+				if ( (x >= 0) && (y >= 0) && (w != 0) && (h != 0) &&
+				     ((x+w) <= screen->w) && ((y+h) <= screen->h) ) {
+					w *= 2;
+					uint32_t ofs = ( x*2 ) + ( y*320*2 );
+					uint8_t* src = src0 + ofs;
+					uint8_t* dst = dst0 + ofs;
+					uint32_t p = screen->pitch;
+					if ( w == p ) memcpy(dst,src,w*h);
+					else for (; h--; src += p, dst += p) memcpy(dst,src,w);
+				}
+			}
+		}
+		if (!screen->unused1) FB_ShowBattery((uint16_t*)dst0);	// trimui_show=no
+		last_draw = flip_flag;
+		pthread_cond_signal(&flip_req);
+		pthread_mutex_unlock(&flip_mx);
+	}
+}
+
+int SDL_Flip(SDL_Surface* screen) {
+	if ((fb0_fd>0)&&(screen == SDL_ShadowSurface)) {
+		pthread_mutex_lock(&flip_mx);
+		uint8_t* src = (uint8_t*)SDL_ShadowSurface->pixels;
+		uint8_t* dst = (uint8_t*)fb0_map + (flip_flag * 320*240*2);
+		memcpy(dst,src,320*240*2);
+		if (!screen->unused1) FB_ShowBattery((uint16_t*)dst);	// trimui_show=no
+		last_draw = flip_flag;
+		pthread_cond_signal(&flip_req);
+		pthread_mutex_unlock(&flip_mx);
+	}
 	return(0);
 }
+///////////////////////////////////////////////////////////
 
 /* Available video drivers */
 static VideoBootStrap *bootstrap[] = {

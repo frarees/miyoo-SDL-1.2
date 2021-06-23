@@ -118,57 +118,10 @@ SDL_AudioDevice *current_audio = NULL;
 int SDL_AudioInit(const char *driver_name);
 void SDL_AudioQuit(void);
 
-// TRIMUI
-#include <unistd.h>
-static int USB_using = -1;
-static int USB_found =  0;
-static int USB_quitting =  0;
-static int USB_count_max;
-static void USB_PollState(void) {
-	static int count = 0;
-	if (count++==0) USB_found = (access("/dev/dsp1", R_OK | W_OK) == 0);
-	if (count>=USB_count_max) count = 0;
-}
-
-static void USB_SetState(void) {
-	if (USB_using!=USB_found) {
-		if (USB_found) SDL_putenv("AUDIODEV=/dev/dsp1");
-		else SDL_putenv("AUDIODEV=/dev/dsp");
-		USB_using = USB_found;
-	}
-}
-static void USB_UpdateState(SDL_AudioDevice* audio) {
-	// lost usb
-	if (USB_using && !audio->enabled) {
-		// headphone write just failed
-		// force audio back to the speaker
-		USB_using = -1;
-		USB_found =  0;
-	}
-	else if (audio->enabled && !USB_using) {
-		// running on speaker
-		USB_PollState();
-		if (USB_using!=USB_found) {
-			// detected headphones
-			audio->enabled = 0;
-		}
-	}
-}
-static void USB_StateChanged(SDL_AudioDevice* audio) {
-	if (!USB_quitting && USB_using!=USB_found) {
-		// TODO: restoring status might be crashy...needs testing
-		// SDL_audiostatus status = SDL_GetAudioStatus();
-		SDL_AudioSpec spec;
-		SDL_memcpy(&spec, &audio->spec, sizeof(audio->spec));
-		// if (status==SDL_AUDIO_PLAYING)
-			SDL_PauseAudio(1);
-		SDL_CloseAudio();
-		SDL_InitSubSystem(SDL_INIT_AUDIO);
-		SDL_OpenAudio(&spec, NULL);
-		// if (status==SDL_AUDIO_PLAYING)
-			SDL_PauseAudio(0);
-	}
-}
+// Additional variables for TRIMUI
+#include	<unistd.h>
+uint32_t	quit_audio = 0;
+uint32_t	now_USB = 0;
 
 /* The general mixing thread function */
 int SDLCALL SDL_RunAudio(void *audiop)
@@ -202,65 +155,96 @@ int SDLCALL SDL_RunAudio(void *audiop)
 		stream_len = audio->spec.size;
 	}
 
-	/* Loop, filling the audio buffers */
+	// TRIMUI
+	// setup 1sec counter
+	uint32_t counter_1sec = audio->spec.freq / audio->spec.samples;
+	if (counter_1sec == 0) counter_1sec = 1;
+	uint32_t counter = counter_1sec;
+
 	while ( audio->enabled ) {
+		/* Loop, filling the audio buffers */
+		while ( audio->enabled ) {
 
-		/* Fill the current buffer with sound */
-		if ( audio->convert.needed ) {
-			if ( audio->convert.buf ) {
-				stream = audio->convert.buf;
+			/* Fill the current buffer with sound */
+			if ( audio->convert.needed ) {
+				if ( audio->convert.buf ) {
+					stream = audio->convert.buf;
+				} else {
+					continue;
+				}
 			} else {
-				continue;
+				stream = audio->GetAudioBuf(audio);
+				if ( stream == NULL ) {
+					stream = audio->fake_stream;
+				}
 			}
-		} else {
-			stream = audio->GetAudioBuf(audio);
-			if ( stream == NULL ) {
-				stream = audio->fake_stream;
+
+			SDL_memset(stream, silence, stream_len);
+
+			if ( ! audio->paused ) {
+				SDL_mutexP(audio->mixer_lock);
+				(*fill)(udata, stream, stream_len);
+				SDL_mutexV(audio->mixer_lock);
 			}
-		}
 
-		SDL_memset(stream, silence, stream_len);
-
-		if ( ! audio->paused ) {
-			SDL_mutexP(audio->mixer_lock);
-			(*fill)(udata, stream, stream_len);
-			SDL_mutexV(audio->mixer_lock);
-		}
-
-		/* Convert the audio if necessary */
-		if ( audio->convert.needed ) {
-			SDL_ConvertAudio(&audio->convert);
-			stream = audio->GetAudioBuf(audio);
-			if ( stream == NULL ) {
-				stream = audio->fake_stream;
+			/* Convert the audio if necessary */
+			if ( audio->convert.needed ) {
+				SDL_ConvertAudio(&audio->convert);
+				stream = audio->GetAudioBuf(audio);
+				if ( stream == NULL ) {
+					stream = audio->fake_stream;
+				}
+				SDL_memcpy(stream, audio->convert.buf,
+				               audio->convert.len_cvt);
 			}
-			SDL_memcpy(stream, audio->convert.buf,
-			               audio->convert.len_cvt);
-		}
 
-		/* Ready current buffer for play and change current buffer */
-		if ( stream != audio->fake_stream ) {
+			/* Ready current buffer for play and change current buffer */
+			if ( stream != audio->fake_stream ) {
 			audio->PlayAudio(audio);
+			}
+			
+			/* Wait for an audio buffer to become available */
+			if ( stream == audio->fake_stream ) {
+				SDL_Delay((audio->spec.samples*1000)/audio->spec.freq);
+			} else {
+				audio->WaitAudio(audio);
+			}
+			
+			// TRIMUI
+			// check USB plugging once per second
+			if (now_USB == 0) {
+				if (--counter == 0) {
+					counter = counter_1sec;
+					if (access("/dev/dsp1", R_OK | W_OK) == 0) {
+						audio->enabled = 0;
+					}
+				}
+			}
 		}
-		
-		/* Wait for an audio buffer to become available */
-		if ( stream == audio->fake_stream ) {
-			SDL_Delay((audio->spec.samples*1000)/audio->spec.freq);
-		} else {
-			audio->WaitAudio(audio);
-		}
-		
-		USB_UpdateState(audio);
-	}
 
-	/* Wait for the audio to drain.. */
-	if ( audio->WaitDone ) {
-		audio->WaitDone(audio);
+		/* Wait for the audio to drain.. */
+		if ( audio->WaitDone ) {
+			audio->WaitDone(audio);
+		}
+		
+		// TRIMUI
+		if (quit_audio) break;
+
+		// changed between speaker/headphones
+		audio->CloseAudio(audio);
+		do {
+			SDL_Delay(1000); // 1s wait between close/open audio
+			if (quit_audio) break;
+			now_USB ^= 1;
+			if (now_USB)	putenv("AUDIODEV=/dev/dsp1");
+			else		putenv("AUDIODEV=/dev/dsp");
+			audio->opened = audio->OpenAudio(audio, &audio->spec)+1;
+			if (quit_audio) break;
+			audio->enabled = audio->opened;
+		} while (! audio->enabled);
 	}
-	
-	USB_StateChanged(audio);
-	
-	return(0);
+	quit_audio = 0;
+	return 0;
 }
 
 static void SDL_LockAudio_Default(SDL_AudioDevice *audio)
@@ -326,10 +310,11 @@ static Uint16 SDL_ParseAudioFormat(const char *string)
 
 int SDL_AudioInit(const char *driver_name)
 {
-	USB_quitting = 0;
-	USB_PollState();
-	USB_SetState();
-	
+	// TRIMUI
+	now_USB = 0;
+	char *audiodev = SDL_getenv("AUDIODEV");
+	if (audiodev != NULL) if (strcmp(audiodev,"/dev/dsp1") == 0) now_USB = 1;
+
 	SDL_AudioDevice *audio;
 	int i = 0, idx;
 
@@ -583,8 +568,6 @@ int SDL_OpenAudio(SDL_AudioSpec *desired, SDL_AudioSpec *obtained)
 		}
 	}
 
-	USB_count_max = audio->spec.freq / audio->spec.samples;
-
 	/* Start the audio thread if necessary */
 	switch (audio->opened) {
 		case  1:
@@ -662,12 +645,12 @@ void SDL_CloseAudio (void)
 
 void SDL_AudioQuit(void)
 {
-	USB_quitting = 1; // prevents restarting audio in USB_StateChanged()
 	SDL_AudioDevice *audio = current_audio;
 
 	if ( audio ) {
 		audio->enabled = 0;
 		if ( audio->thread != NULL ) {
+			quit_audio = 1;	// TRIMUI
 			SDL_WaitThread(audio->thread, NULL);
 		}
 		if ( audio->mixer_lock != NULL ) {

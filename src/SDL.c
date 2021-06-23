@@ -33,6 +33,9 @@
 #include <pth.h>
 #endif
 
+// TRIMUI
+#include	<unistd.h>
+
 /* Initialization/Cleanup routines */
 #if !SDL_JOYSTICK_DISABLED
 extern int  SDL_JoystickInit(void);
@@ -102,6 +105,10 @@ int SDL_InitSubSystem(Uint32 flags)
 #if !SDL_AUDIO_DISABLED
 	/* Initialize the audio subsystem */
 	if ( (flags & SDL_INIT_AUDIO) && !(SDL_initialized & SDL_INIT_AUDIO) ) {
+		// TRIMUI
+		if (access("/dev/dsp1", R_OK | W_OK) == 0) SDL_putenv("AUDIODEV=/dev/dsp1");
+		else SDL_putenv("AUDIODEV=/dev/dsp");
+
 		if ( SDL_AudioInit(SDL_getenv("SDL_AUDIODRIVER")) < 0 ) {
 			return(-1);
 		}
