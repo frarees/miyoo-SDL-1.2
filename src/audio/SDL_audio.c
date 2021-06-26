@@ -215,7 +215,7 @@ int SDLCALL SDL_RunAudio(void *audiop)
 			if (now_USB == 0) {
 				if (--counter == 0) {
 					counter = counter_1sec;
-					if (access("/dev/dsp1", R_OK | W_OK) == 0) {
+					if (access("/dev/dsp1", F_OK) == 0) {
 						audio->enabled = 0;
 					}
 				}
@@ -233,17 +233,16 @@ int SDLCALL SDL_RunAudio(void *audiop)
 		// changed between speaker/headphones
 		audio->CloseAudio(audio);
 		do {
-			SDL_Delay(1000); // 1s wait between close/open audio
+			SDL_Delay(512); // wait 0.5s when changed
 			if (quit_audio) break;
 			now_USB ^= 1;
-			if (now_USB)	putenv("AUDIODEV=/dev/dsp1");
-			else		putenv("AUDIODEV=/dev/dsp");
-			audio->opened = audio->OpenAudio(audio, &audio->spec)+1;
+			if (now_USB)	setenv("AUDIODEV","/dev/dsp1",1);
+			else		setenv("AUDIODEV","/dev/dsp",1);
+			audio->enabled = audio->OpenAudio(audio, &audio->spec)+1;
 			if (quit_audio) break;
-			audio->enabled = audio->opened;
 		} while (! audio->enabled);
 	}
-	quit_audio = 0;
+	audio->enabled = quit_audio = 0;
 	return 0;
 }
 

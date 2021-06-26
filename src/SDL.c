@@ -106,8 +106,8 @@ int SDL_InitSubSystem(Uint32 flags)
 	/* Initialize the audio subsystem */
 	if ( (flags & SDL_INIT_AUDIO) && !(SDL_initialized & SDL_INIT_AUDIO) ) {
 		// TRIMUI
-		if (access("/dev/dsp1", R_OK | W_OK) == 0) SDL_putenv("AUDIODEV=/dev/dsp1");
-		else SDL_putenv("AUDIODEV=/dev/dsp");
+		if (access("/dev/dsp1", F_OK) == 0) setenv("AUDIODEV","/dev/dsp1",1);
+		else setenv("AUDIODEV","/dev/dsp",1);
 
 		if ( SDL_AudioInit(SDL_getenv("SDL_AUDIODRIVER")) < 0 ) {
 			return(-1);
