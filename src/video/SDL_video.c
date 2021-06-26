@@ -31,7 +31,11 @@
 #include "../events/SDL_sysevents.h"
 #include "../events/SDL_events_c.h"
 
-/////////////////////////////////////////////////////////// TRIMUI
+///////////////////////////////////////////////////////////
+//	For SDL_video.c
+//	Replace SDL_Flip and SDL_UpdateRects to avoid Screen Tearing
+//	For TRIMUI, SWSURFACE only
+///////////////////////////////////////////////////////////
 #include <sys/mman.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -61,17 +65,23 @@ uint16_t	vbp;
 uint32_t	sleepns_mul;
 struct fb_var_screeninfo fbvar;
 
+//
+//	Thread to execute flip
+//
 static void* FB_FlipThread(void* param) {
 	struct timespec	sleeptime = {0,0};
 	while(1) {
+		// wait until flip request
 		pthread_mutex_lock(&flip_mx);
 		pthread_cond_wait(&flip_req,&flip_mx);
 		pthread_mutex_unlock(&flip_mx);
 		while(1) {
+			// get currently processing line
 			uint16_t* tcon_map = (uint16_t*)mmap(0, TCON_DEBUG_INFO_REG+4, PROT_READ, MAP_PRIVATE, mem_fd, 0x01c0c000);	// TCON
 			uint16_t line = (tcon_map[(TCON_DEBUG_INFO_REG+2)/2]) & 0x3ff;
 			munmap(tcon_map,TCON_DEBUG_INFO_REG+4);
 			if ((line<vbp)||(line>=240+vbp)) {
+				// currently on vblank .. exec flip
 				pthread_mutex_lock(&flip_mx);
 				debe_map[DEBE_LAY3_FB_ADDR_REG/4] = fb_addr + (flip_flag * 320*240*16);
 				flip_flag ^= 1;
@@ -79,6 +89,7 @@ static void* FB_FlipThread(void* param) {
 				pthread_mutex_unlock(&flip_mx);
 				break;
 			}
+			// wait until next vblank
 			sleeptime.tv_nsec = (240+vbp-line)*sleepns_mul;
 			nanosleep(&sleeptime,NULL);
 		}
@@ -86,25 +97,33 @@ static void* FB_FlipThread(void* param) {
 	return 0;
 }
 
+//
+//	Prepare and start flip process
+//
 // call in SDL_VideoInit()
 static void FB_Flip_prepare() {
 	if (fb0_fd == 0) {
+		// create flip thread
 		flip_mx = (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER;
 		flip_req = (pthread_cond_t)PTHREAD_COND_INITIALIZER;
 		pthread_create(&flip_pt, NULL, FB_FlipThread, NULL);
 
+		// open framebuffer, set pan to 0,0 and wait a moment
 		fb0_fd = open("/dev/fb0", O_RDWR);
 		fb0_map = (uint8_t*)mmap(0, 320*480*2, PROT_READ | PROT_WRITE, MAP_SHARED, fb0_fd, 0);
 		ioctl(fb0_fd, FBIOGET_VSCREENINFO, &fbvar);
 		fbvar.xoffset = fbvar.yoffset = 0;
 		ioctl(fb0_fd, FBIOPAN_DISPLAY, &fbvar); // run twice to wait for PAN to be applied
 		ioctl(fb0_fd, FBIOPAN_DISPLAY, &fbvar);	// and for FlipThread is surely started
+
+		// get framebuffer hardware address for flip
 		mem_fd = open("/dev/mem", O_RDWR);
 		debe_map = (uint32_t*)mmap(0, 0x1000, PROT_READ | PROT_WRITE, MAP_SHARED, mem_fd, 0x01e60000);	// DEBE
 		fb_addr = debe_map[DEBE_LAY3_FB_ADDR_REG/4];
 		flip_flag = 1;
 		last_draw = 0;
 
+		// calculate time(ns) to process one line and get vbp
 		uint16_t* tcon_map = (uint16_t*)mmap(0, TCON0_BASIC_TIMING_REG2+4, PROT_READ, MAP_PRIVATE, mem_fd, 0x01c0c000);	// TCON
 		uint16_t ht = (tcon_map[(TCON0_BASIC_TIMING_REG1+2)/2])+1;
 		uint16_t vt = (tcon_map[(TCON0_BASIC_TIMING_REG2+2)/2])/2;
@@ -114,18 +133,23 @@ static void FB_Flip_prepare() {
 	}
 }
 
+//
+//	Finish flip process
+//
 // call in SDL_VideoQuit()
 static void FB_Flip_finish() {
 	if (fb0_fd>0) {
+		// kill flip thread
 		pthread_cancel(flip_pt);
 		pthread_join(flip_pt,NULL);
 
+		// restore pan to 0,0 and wait for vsync to avoid flicker
+		ioctl(fb0_fd, FBIOPAN_DISPLAY, &fbvar);
 		debe_map[DEBE_LAY3_FB_ADDR_REG/4] = fb_addr;
 		munmap(debe_map,0x1000);
 		close(mem_fd);
 
-		// wait for vsync to avoid flicker
-		ioctl(fb0_fd, FBIOPAN_DISPLAY, &fbvar);
+		// leave the current display and clear backbuffer
 		if (last_draw == 1) memcpy(fb0_map, fb0_map + 320*240*2, 320*240*2);
 		memset(fb0_map + 320*240*2,0,320*240*2); // clear screen2 only
 		munmap(fb0_map,320*480*2);
@@ -134,6 +158,9 @@ static void FB_Flip_finish() {
 	fb0_fd = 0;
 }
 
+//
+//	Show red battery icon if necessary
+//
 #define BAT_CHECK_INTERVAL_MS 10000
 static unsigned long bat_last_check = 0;
 static int bat_low = 0;
@@ -176,13 +203,35 @@ static void FB_ShowBattery(uint16_t *dst_px) {
 	}
 }
 
+//
+//	Replacement of SDL_Flip()
+//
+int SDL_Flip(SDL_Surface* screen) {
+	if ((fb0_fd>0)&&(screen == SDL_ShadowSurface)) {
+		pthread_mutex_lock(&flip_mx);
+		uint8_t* src = (uint8_t*)screen->pixels;
+		uint8_t* dst = (uint8_t*)fb0_map + (flip_flag * 320*240*2);
+		// update entire screen
+		memcpy(dst,src,320*240*2);
+		if (!screen->unused1) FB_ShowBattery((uint16_t*)dst);	// trimui_show=no
+		last_draw = flip_flag;
+		// request flip
+		pthread_cond_signal(&flip_req);
+		pthread_mutex_unlock(&flip_mx);
+	}
+	return(0);
+}
+
+//
+//	Replacement of SDL_UpdateRects()
+//
 void SDL_UpdateRects(SDL_Surface *screen, int numrects, SDL_Rect *rects) {
 	if ((fb0_fd>0)&&(screen == SDL_ShadowSurface)) {
 		pthread_mutex_lock(&flip_mx);
 		uint8_t* src0 = (uint8_t*)screen->pixels;
 		uint8_t* dst0 = (uint8_t*)fb0_map + (flip_flag * 320*240*2);
 		if ((numrects == 1)&&(rects[0].x == 0)&&(rects[0].y == 0)&&
-		    (rects[0].w == screen->w)&&(rects[0].h == screen->h)) {
+		    (rects[0].w == 320)&&(rects[0].h == 240)) {
 			// update entire screen
 			memcpy(dst0,src0,320*240*2);
 		} else {
@@ -198,12 +247,12 @@ void SDL_UpdateRects(SDL_Surface *screen, int numrects, SDL_Rect *rects) {
 				uint32_t w = rects[i].w;
 				uint32_t h = rects[i].h;
 				if ( (x >= 0) && (y >= 0) && (w != 0) && (h != 0) &&
-				     ((x+w) <= screen->w) && ((y+h) <= screen->h) ) {
+				     ((x+w) <= 320) && ((y+h) <= 240) ) {
 					w *= 2;
 					uint32_t ofs = ( x*2 ) + ( y*320*2 );
 					uint8_t* src = src0 + ofs;
 					uint8_t* dst = dst0 + ofs;
-					uint32_t p = screen->pitch;
+					uint32_t p = 640;
 					if ( w == p ) memcpy(dst,src,w*h);
 					else for (; h--; src += p, dst += p) memcpy(dst,src,w);
 				}
@@ -211,23 +260,10 @@ void SDL_UpdateRects(SDL_Surface *screen, int numrects, SDL_Rect *rects) {
 		}
 		if (!screen->unused1) FB_ShowBattery((uint16_t*)dst0);	// trimui_show=no
 		last_draw = flip_flag;
+		// request flip
 		pthread_cond_signal(&flip_req);
 		pthread_mutex_unlock(&flip_mx);
 	}
-}
-
-int SDL_Flip(SDL_Surface* screen) {
-	if ((fb0_fd>0)&&(screen == SDL_ShadowSurface)) {
-		pthread_mutex_lock(&flip_mx);
-		uint8_t* src = (uint8_t*)SDL_ShadowSurface->pixels;
-		uint8_t* dst = (uint8_t*)fb0_map + (flip_flag * 320*240*2);
-		memcpy(dst,src,320*240*2);
-		if (!screen->unused1) FB_ShowBattery((uint16_t*)dst);	// trimui_show=no
-		last_draw = flip_flag;
-		pthread_cond_signal(&flip_req);
-		pthread_mutex_unlock(&flip_mx);
-	}
-	return(0);
 }
 ///////////////////////////////////////////////////////////
 
