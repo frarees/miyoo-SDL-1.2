@@ -64,6 +64,7 @@ pthread_cond_t	flip_req;
 uint16_t	vbp;
 uint32_t	sleepns_mul;
 struct fb_var_screeninfo fbvar;
+#define TRIMUI_SHOW unused1
 
 //
 //	Thread to execute flip
@@ -213,7 +214,7 @@ int SDL_Flip(SDL_Surface* screen) {
 		uint8_t* dst = (uint8_t*)fb0_map + (flip_flag * 320*240*2);
 		// update entire screen
 		memcpy(dst,src,320*240*2);
-		if (!screen->unused1) FB_ShowBattery((uint16_t*)dst);	// trimui_show=no
+		if (!screen->TRIMUI_SHOW) FB_ShowBattery((uint16_t*)dst);	// trimui_show=no
 		last_draw = flip_flag;
 		// request flip
 		pthread_cond_signal(&flip_req);
@@ -258,7 +259,7 @@ void SDL_UpdateRects(SDL_Surface *screen, int numrects, SDL_Rect *rects) {
 				}
 			}
 		}
-		if (!screen->unused1) FB_ShowBattery((uint16_t*)dst0);	// trimui_show=no
+		if (!screen->TRIMUI_SHOW) FB_ShowBattery((uint16_t*)dst0);	// trimui_show=no
 		last_draw = flip_flag;
 		// request flip
 		pthread_cond_signal(&flip_req);
@@ -1163,7 +1164,7 @@ SDL_Surface * SDL_SetVideoMode (int width, int height, int bpp, Uint32 flags)
 	video->info.current_h = SDL_VideoSurface->h;
 
 	/* We're done! */
-	SDL_PublicSurface->unused1 = 0;
+	SDL_PublicSurface->TRIMUI_SHOW = 0;
 	return(SDL_PublicSurface);
 }
 
