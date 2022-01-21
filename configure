@@ -1662,6 +1662,7 @@ Optional Features:
   --enable-cpuinfo        Enable the cpuinfo subsystem [default=yes]
   --enable-assembly       Enable assembly routines [default=yes]
   --enable-oss            support the OSS audio API [default=yes]
+  --enable-miao           support the MI AO audio API [default=yes]
   --enable-alsa           support the ALSA audio API [default=yes]
   --disable-alsatest      Do not try to compile and run a test Alsa program
   --enable-alsa-shared    dynamically load ALSA audio support [default=yes]
@@ -16805,6 +16806,28 @@ if test x$enable_assembly = xyes; then
 
 fi
 
+CheckMIAO()
+{
+    # Check whether --enable-miao was given.
+if test "${enable_miao+set}" = set; then :
+  enableval=$enable_miao;
+else
+  enable_miao=yes
+fi
+
+ if test x$enable_audio = xyes -a x$enable_miao = xyes; then
+	 
+	# TODO: check whether the mi_ libs are available and add them
+
+$as_echo "#define SDL_AUDIO_DRIVER_MIAO 1" >>confdefs.h
+
+SOURCES="$SOURCES $srcdir/src/audio/miao/*.c"
+have_audio=yes
+have_miao=yes
+fi
+
+}
+
 CheckOSS()
 {
     # Check whether --enable-oss was given.
@@ -22164,6 +22187,7 @@ case "$host" in
         CheckARM
         CheckNEON
         CheckOSS
+		CheckMIAO
         CheckDMEDIA
         CheckMME
         CheckALSA

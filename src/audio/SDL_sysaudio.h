@@ -102,6 +102,9 @@ typedef struct AudioBootStrap {
 	SDL_AudioDevice *(*create)(int devindex);
 } AudioBootStrap;
 
+#if SDL_AUDIO_DRIVER_MIAO
+extern AudioBootStrap MIAO_bootstrap;
+#endif
 #if SDL_AUDIO_DRIVER_SNDIO
 extern AudioBootStrap SNDIO_bootstrap;
 #endif

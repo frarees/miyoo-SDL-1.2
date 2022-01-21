@@ -321,6 +321,22 @@ if test x$enable_assembly = xyes; then
     AC_DEFINE(SDL_ASSEMBLY_ROUTINES)
 fi
 
+dnl See if the MI_AO audio interface is supported
+CheckMIAO()
+{
+    AC_ARG_ENABLE(miao,
+[AS_HELP_STRING([--enable-miao], [support the MI_AO audio API [default=yes]])],
+                  , enable_miao=yes)
+    if test x$enable_audio = xyes -a x$enable_miao = xyes; then
+        AC_MSG_CHECKING(for MI_AO audio support)
+        if test x$enable_miao = xyes; then
+            AC_DEFINE(SDL_AUDIO_DRIVER_MIAO)
+            SOURCES="$SOURCES $srcdir/src/audio/miao/*.c"
+            have_audio=yes
+        fi
+    fi
+}
+
 dnl See if the OSS audio interface is supported
 CheckOSS()
 {
@@ -2514,6 +2530,7 @@ case "$host" in
         CheckAltivec
         CheckARM
         CheckNEON
+        CheckMIAO
         CheckOSS
         CheckDMEDIA
         CheckMME
