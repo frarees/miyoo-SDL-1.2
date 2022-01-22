@@ -1557,6 +1557,18 @@ static int FB_FlipHWSurface(_THIS, SDL_Surface *surface)
 		SDL_UnlockMutex(triplebuf_mutex);
 #endif
 	} else {
+		// in-place rotation
+		uint32_t* buf = (uint32_t*)flip_address[flip_page];
+		int i = 640 * 480 - 1;
+		int j = 0;
+		while (i > j) {
+			int temp = buf[i];
+			buf[i] = buf[j];
+			buf[j] = temp;
+			i--;
+			j++;
+		}
+		
 		/* Wait for vertical retrace and then flip display */
 		cache_vinfo.yoffset = flip_page * cache_vinfo.yres;
 
