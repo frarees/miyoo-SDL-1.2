@@ -91,17 +91,23 @@ AudioBootStrap MIAO_bootstrap = {
 };
 
 static struct timeval tod;
-double nextclock;
-static double usec_par_frame;
 static int usleepclock;
+static uint64_t startclock;
+static uint64_t clock_freqframes;
+static uint32_t framecounter;
 
 /* This function waits until it is possible to write a full sound buffer */
 static void MIAO_WaitAudio(_THIS)
 {
-	nextclock += usec_par_frame;
+	framecounter++;
+	if (framecounter == (uint32_t)this->spec.freq) {
+		framecounter = 0;
+		startclock += clock_freqframes;
+	}
+	
 	gettimeofday(&tod, NULL);
-	usleepclock = nextclock - (tod.tv_usec + tod.tv_sec*1000000);
-	if (usleepclock>0) usleep(usleepclock);
+	usleepclock = framecounter * clock_freqframes / this->spec.freq + startclock - (tod.tv_usec + tod.tv_sec * 1000000);
+	if (usleepclock > 0) usleep(usleepclock);
 }
 
 static void MIAO_PlayAudio(_THIS)
@@ -109,6 +115,8 @@ static void MIAO_PlayAudio(_THIS)
 	// MI_S32 ret = MI_AO_SendFrame(0, 0, frame, 0);
 	// if (ret) fprintf(stdout, "MI_Error: err:0x%x\n", ret);
 	
+	// NOTE: this is not the cause of the crash/hang
+	// or at least the response to it evaluating to true isn't
 	if (MI_AO_SendFrame(0, 0, frame, 0))
 	{
 		perror("Audio write");
@@ -129,6 +137,7 @@ static void MIAO_CloseAudio(_THIS)
 {
 	fprintf(stdout, "close miao audio\n");
 	
+	MI_AO_ClearChnBuf(0,0);
 	MI_AO_DisableChn(0,0);
 	MI_AO_Disable(0);
 	
@@ -176,21 +185,19 @@ static int MIAO_OpenAudio(_THIS, SDL_AudioSpec *spec)
 	
 	fprintf(stdout, "buffer size: %d\n", mixlen);
 	
-	usec_par_frame = spec->samples * 1000000 / spec->freq;
-
-	void (*fill)(void*, Uint8*, int) = spec->callback;
-	void *udata = spec->userdata;
-	
 	MI_AO_SetPubAttr(0,&attr);
 	MI_AO_Enable(0);
 	MI_AO_EnableChn(0,0);
+	MI_AO_ClearChnBuf(0,0);
 	
 	for (int i=0; i<2; i++) {
 		MI_AO_SendFrame(0, 0, frame, 0);
 	}
 	
+	clock_freqframes = spec->samples * 1000000;
+	framecounter = 0;
 	gettimeofday(&tod, NULL);
-	nextclock = tod.tv_usec + tod.tv_sec*1000000;
+	startclock = tod.tv_usec + tod.tv_sec * 1000000;
 	
 	/* Get the parent process id (we're the parent of the audio thread) */
 	parent = getpid();
