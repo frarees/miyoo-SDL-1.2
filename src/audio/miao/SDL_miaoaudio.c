@@ -38,9 +38,7 @@ static void MIAO_CloseAudio(_THIS);
 
 static int Audio_Available(void)
 {
-	int available = 1;
-	fprintf(stdout, "audio available: %i\n", available);
-	return(available);
+	return(1);
 }
 
 static void Audio_DeleteDevice(SDL_AudioDevice *device)

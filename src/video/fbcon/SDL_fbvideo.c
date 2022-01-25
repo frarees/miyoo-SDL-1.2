@@ -1468,6 +1468,19 @@ static void FB_WaitIdle(_THIS)
 	return;
 }
 
+static void Flip180(uint32_t* restrict dst) {
+	// TODO: this is incredibly slow! 50ms
+	uint32_t i = 640 * 480 - 1;
+	uint32_t j = 0;
+	while (i > j) {
+		uint32_t tmp = dst[i];
+		dst[i] = dst[j];
+		dst[j] = tmp;
+		i--;
+		j++;
+	}
+}
+
 #if !SDL_THREADS_DISABLED
 static int FB_TripleBufferingThread(void *d)
 {
@@ -1546,6 +1559,9 @@ static int FB_FlipHWSurface(_THIS, SDL_Surface *surface)
 #if !SDL_THREADS_DISABLED
 		unsigned int page;
 
+		// MIYOO MINI
+		Flip180((uint32_t*)flip_address[flip_page]);
+		
 		/* Flip the two back buffers */
 		SDL_LockMutex(triplebuf_mutex);
 		page = new_page;
@@ -1557,17 +1573,8 @@ static int FB_FlipHWSurface(_THIS, SDL_Surface *surface)
 		SDL_UnlockMutex(triplebuf_mutex);
 #endif
 	} else {
-		// in-place rotation
-		uint32_t* buf = (uint32_t*)flip_address[flip_page];
-		int i = 640 * 480 - 1;
-		int j = 0;
-		while (i > j) {
-			int temp = buf[i];
-			buf[i] = buf[j];
-			buf[j] = temp;
-			i--;
-			j++;
-		}
+		// MIYOO MINI
+		Flip180((uint32_t*)flip_address[flip_page]);
 		
 		/* Wait for vertical retrace and then flip display */
 		cache_vinfo.yoffset = flip_page * cache_vinfo.yres;

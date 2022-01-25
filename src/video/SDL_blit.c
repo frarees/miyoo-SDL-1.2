@@ -152,12 +152,11 @@ static __inline__ void SDL_memcpySSE(Uint8 *to, const Uint8 *from, int len)
 #endif
 #endif
 
-static void rotate180(uint32_t* restrict dst, uint32_t* restrict src) {
-	dst += 640 * 480 - 1;
-	for (int i=0; i<640*480; i++) {
-		*dst = *src;
-		src += 1;
-		dst -= 1;
+static void Blit180(uint32_t* restrict dst, uint32_t* restrict src) {
+	uint32_t i;
+	src += 640*480-1;
+	for (i=640*480; i>0; i--) {
+		*dst++ = *src--;
 	}
 }
 
@@ -170,8 +169,9 @@ static void SDL_BlitCopy(SDL_BlitInfo *info)
 	src = info->s_pixels;
 	dst = info->d_pixels;
 
+	// MIYOO MINI
 	if ((dst==SDL_VideoSurface->pixels && !(SDL_VideoSurface->flags&SDL_DOUBLEBUF)) || src==SDL_VideoSurface->pixels) {
-		rotate180((uint32_t*)dst,(uint32_t*)src);
+		Blit180((uint32_t*)dst,(uint32_t*)src);
 		return;
 	}
 
