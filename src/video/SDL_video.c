@@ -31,6 +31,194 @@
 #include "../events/SDL_sysevents.h"
 #include "../events/SDL_events_c.h"
 
+#include <unistd.h>
+#include <fcntl.h>
+#include <linux/fb.h>
+#include <sys/ioctl.h>
+#include <pthread.h>
+#include <mi_sys.h>
+#include <mi_gfx.h>
+
+#define MIYOO_MINI_GFX
+
+#if defined(MIYOO_MINI_GFX)
+#define	pixelsPa	unused1
+#define ALIGN4K(val)	((val+4095)>>12)<<12
+
+static int			fd_fb = 0;
+static struct			fb_fix_screeninfo finfo;
+static struct			fb_var_screeninfo vinfo;
+static MI_PHY			fb_phyAddr;
+static MI_GFX_Surface_t	stSrc;
+static MI_GFX_Rect_t		stSrcRect;
+static MI_GFX_Surface_t	stDst;
+static MI_GFX_Rect_t		stDstRect;
+static MI_GFX_Opt_t		stOpt;
+static uint32_t		now_flipping;
+static pthread_t		flip_pt;
+static pthread_mutex_t		flip_mx;
+static pthread_cond_t		flip_req;
+
+//
+//	Actual Flip thread
+//		rev4 : TRIPLEBUF +1
+//
+static void* GFX_FlipThread(void* param) {
+	uint32_t	target_offset;
+	while(1) {
+		pthread_mutex_lock(&flip_mx);
+		pthread_cond_wait(&flip_req,&flip_mx);
+		pthread_mutex_unlock(&flip_mx);
+		do {	target_offset = vinfo.yoffset + 480;
+			if ( target_offset == 1440 ) target_offset = 0;
+			vinfo.yoffset = target_offset;
+			ioctl(fd_fb, FBIOPAN_DISPLAY, &vinfo);
+			now_flipping--;
+		} while(now_flipping);
+	}
+	return 0;
+}
+
+//
+//	GFX Flip
+//		HW Blit : surface -> FB(backbuffer) with Rotate180/bppConvert/Scaling
+//		and Request Flip
+//		rev4 : TRIPLEBUF +1
+//
+static void	GFX_Flip(SDL_Surface *surface) {
+	MI_U16		Fence;
+	uint32_t	target_offset;
+
+	if ((now_flipping < 2)&&(surface->pixelsPa)) {
+		stSrc.phyAddr = surface->pixelsPa;
+		if (surface->format->BytesPerPixel == 2) {
+			stSrc.eColorFmt = E_MI_GFX_FMT_RGB565;
+		} else {
+			stSrc.eColorFmt = E_MI_GFX_FMT_ARGB8888;
+		}
+		stSrc.u32Width = surface->w;
+		stSrc.u32Height = surface->h;
+		stSrc.u32Stride = surface->pitch;
+		stSrcRect.u32Width = stSrc.u32Width;
+		stSrcRect.u32Height = stSrc.u32Height;
+
+		MI_SYS_FlushInvCache(surface->pixels, ALIGN4K(surface->pitch * surface->h));
+
+		target_offset = vinfo.yoffset + 480;
+		if ( target_offset == 1440 ) target_offset = 0;
+		stDst.phyAddr = fb_phyAddr + (640*target_offset*4);
+
+		MI_GFX_BitBlit(&stSrc,&stSrcRect,&stDst,&stDstRect,&stOpt,&Fence);
+		MI_GFX_WaitAllDone(FALSE, Fence);
+
+		// Request Flip
+		now_flipping++;
+		if (now_flipping == 1) {
+			pthread_mutex_lock(&flip_mx);
+			pthread_cond_signal(&flip_req);
+			pthread_mutex_unlock(&flip_mx);
+		}
+	}
+}
+
+//
+//	GFX Init
+//		Prepare for HW Blit to FB
+//
+static void	GFX_Init(void) {
+	if (fd_fb == 0) {
+		// GFX_Init is now called _by_ SDL_SetVideoMode. Initception!
+		// SDL_SetVideoMode(640, 480, 32, SDL_SWSURFACE);
+		MI_SYS_Init();
+		MI_GFX_Open();
+
+		fd_fb = open("/dev/fb0", O_RDWR);
+		ioctl(fd_fb, FBIOGET_FSCREENINFO, &finfo);
+		fb_phyAddr = finfo.smem_start;
+		ioctl(fd_fb, FBIOGET_VSCREENINFO, &vinfo);
+		vinfo.yoffset = 0;
+		ioctl(fd_fb, FBIOPUT_VSCREENINFO, &vinfo);
+		MI_SYS_MemsetPa(fb_phyAddr, 0, 640*480*4*3);
+
+		stDst.phyAddr = fb_phyAddr;
+		stDst.eColorFmt = E_MI_GFX_FMT_ARGB8888;
+		stDst.u32Width = 640;
+		stDst.u32Height = 480;
+		stDst.u32Stride = 640*4;
+		stDstRect.s32Xpos = 0;
+		stDstRect.s32Ypos = 0;
+		stDstRect.u32Width = 640;
+		stDstRect.u32Height = 480;
+		stSrcRect.s32Xpos = 0;
+		stSrcRect.s32Ypos = 0;
+
+		memset(&stOpt, 0, sizeof(stOpt));
+		stOpt.eSrcDfbBldOp = E_MI_GFX_DFB_BLD_ONE;
+		stOpt.eRotate = E_MI_GFX_ROTATE_180;
+
+		flip_mx = (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER;
+		flip_req = (pthread_cond_t)PTHREAD_COND_INITIALIZER;
+		now_flipping = 0;
+		pthread_create(&flip_pt, NULL, GFX_FlipThread, NULL);
+	}
+}
+
+//
+//	GFX Quit
+//
+static void	GFX_Quit(void) {
+	if (fd_fb) {
+		pthread_cancel(flip_pt);
+		pthread_join(flip_pt,NULL);
+
+		MI_SYS_MemsetPa(fb_phyAddr, 0, 640*480*4*3);
+		vinfo.yoffset = 0;
+		ioctl(fd_fb, FBIOPUT_VSCREENINFO, &vinfo);
+		close(fd_fb);
+		fd_fb = 0;
+		MI_GFX_Close();
+		MI_SYS_Exit();
+	}
+}
+
+//
+//	Create GFX Surface / almost same as SDL_CreateRGBSurface
+//		flags has no meaning, fixed to SWSURFACE
+//		Additional return value : surface->unused1 = Physical address of surface
+//
+static SDL_Surface*	GFX_CreateRGBSurface(uint32_t flags, int width, int height, int depth, uint32_t Rmask, uint32_t Gmask, uint32_t Bmask, uint32_t Amask) {
+	SDL_Surface*	surface;
+	MI_PHY		phyAddr;
+	void*		virAddr;
+	int		pitch = width * (uint32_t)(depth/8);
+	uint32_t	size = pitch * height;
+
+	if (MI_SYS_MMA_Alloc(NULL, ALIGN4K(size), &phyAddr)) return NULL;
+	MI_SYS_MemsetPa(phyAddr, 0, size);
+	MI_SYS_Mmap(phyAddr, ALIGN4K(size), &virAddr, TRUE);	// write cache ON needs Flush when r/w Pa directly
+
+	surface = SDL_CreateRGBSurfaceFrom(virAddr,width,height,depth,pitch,Rmask,Gmask,Bmask,Amask);
+	if (surface != NULL) surface->pixelsPa = phyAddr;
+	return surface;
+}
+
+//
+//	Free GFX Surface / almost same as SDL_FreeSurface
+//
+static void	GFX_FreeSurface(SDL_Surface *surface) {
+	MI_PHY		phyAddr = surface->pixelsPa;
+	void*		virAddr = surface->pixels;
+	uint32_t	size = surface->pitch * surface->h;
+
+	SDL_FreeSurface(surface);
+	if (phyAddr) {
+		MI_SYS_Munmap(virAddr, ALIGN4K(size));
+		MI_SYS_MMA_Free(phyAddr);
+	}
+}
+
+#endif
+
 /* Available video drivers */
 static VideoBootStrap *bootstrap[] = {
 #if SDL_VIDEO_DRIVER_QUARTZ
@@ -589,7 +777,7 @@ static void SDL_CreateShadowSurface(int depth)
 /*
  * Set the requested video mode, allocating a shadow buffer if necessary.
  */
-SDL_Surface * SDL_SetVideoMode (int width, int height, int bpp, Uint32 flags)
+SDL_Surface * _SDL_SetVideoMode (int width, int height, int bpp, Uint32 flags)
 {
 	SDL_VideoDevice *video, *this;
 	SDL_Surface *prev_mode, *mode;
@@ -930,6 +1118,26 @@ SDL_Surface * SDL_SetVideoMode (int width, int height, int bpp, Uint32 flags)
 	return(SDL_PublicSurface);
 }
 
+SDL_Surface * SDL_SetVideoMode (int width, int height, int bpp, Uint32 flags) { // flags is unused
+#if defined(MIYOO_MINI_GFX)
+	SDL_Surface* ready_to_go = NULL;
+
+	if (SDL_PublicSurface && SDL_PublicSurface->pixelsPa) ready_to_go = SDL_PublicSurface;
+
+	_SDL_SetVideoMode(640,480,32,SDL_SWSURFACE);
+
+	GFX_Init();
+
+	if (ready_to_go) GFX_FreeSurface(ready_to_go);
+
+	SDL_PublicSurface = GFX_CreateRGBSurface(0,width,height,bpp,0,0,0,0);
+
+	return(SDL_PublicSurface);
+#else
+	return _SDL_SetVideoMode(width,height,bpp,flags);
+#endif
+}
+
 /* 
  * Convert a surface into the video pixel format.
  */
@@ -1111,7 +1319,7 @@ void SDL_UpdateRects (SDL_Surface *screen, int numrects, SDL_Rect *rects)
 /*
  * Performs hardware double buffering, if possible, or a full update if not.
  */
-int SDL_Flip(SDL_Surface *screen)
+int _SDL_Flip(SDL_Surface *screen)
 {
 	SDL_VideoDevice *video = current_video;
 	/* Copy the shadow surface to the video surface */
@@ -1160,6 +1368,15 @@ int SDL_Flip(SDL_Surface *screen)
 		SDL_UpdateRect(screen, 0, 0, 0, 0);
 	}
 	return(0);
+}
+
+int SDL_Flip(SDL_Surface *screen) {
+#if defined(MIYOO_MINI_GFX)
+	GFX_Flip(screen);
+	return(0);
+#else
+	_SDL_Flip(screen);
+#endif
 }
 
 static void SetPalette_logical(SDL_Surface *screen, SDL_Color *colors,
@@ -1352,6 +1569,10 @@ int SDL_SetColors(SDL_Surface *screen, SDL_Color *colors, int firstcolor,
  */
 void SDL_VideoQuit (void)
 {
+#if defined(MIYOO_MINI_GFX)
+	GFX_FreeSurface(SDL_PublicSurface);
+	GFX_Quit();
+#endif
 	SDL_Surface *ready_to_go;
 
 	if ( current_video ) {

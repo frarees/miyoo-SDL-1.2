@@ -948,7 +948,9 @@ void SDL_FreeSurface (SDL_Surface *surface)
 	/* Free anything that's not NULL, and not the screen surface */
 	if ((surface == NULL) ||
 	    (current_video &&
-	    ((surface == SDL_ShadowSurface)||(surface == SDL_VideoSurface)))) {
+	    ((surface == SDL_ShadowSurface)||(surface == SDL_VideoSurface))) || 
+		surface->unused1 // and not a MIYOO MINI GFX Surface
+	) {
 		return;
 	}
 	if ( --surface->refcount > 0 ) {
