@@ -1560,7 +1560,7 @@ static int FB_FlipHWSurface(_THIS, SDL_Surface *surface)
 		unsigned int page;
 
 		// MIYOO MINI
-		Flip180((uint32_t*)flip_address[flip_page]);
+		// Flip180((uint32_t*)flip_address[flip_page]);
 		
 		/* Flip the two back buffers */
 		SDL_LockMutex(triplebuf_mutex);
@@ -1574,7 +1574,7 @@ static int FB_FlipHWSurface(_THIS, SDL_Surface *surface)
 #endif
 	} else {
 		// MIYOO MINI
-		Flip180((uint32_t*)flip_address[flip_page]);
+		// Flip180((uint32_t*)flip_address[flip_page]);
 		
 		/* Wait for vertical retrace and then flip display */
 		cache_vinfo.yoffset = flip_page * cache_vinfo.yres;

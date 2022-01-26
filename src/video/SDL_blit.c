@@ -169,11 +169,11 @@ static void SDL_BlitCopy(SDL_BlitInfo *info)
 	src = info->s_pixels;
 	dst = info->d_pixels;
 
-	// MIYOO MINI
-	if ((dst==SDL_VideoSurface->pixels && !(SDL_VideoSurface->flags&SDL_DOUBLEBUF)) || src==SDL_VideoSurface->pixels) {
-		Blit180((uint32_t*)dst,(uint32_t*)src);
-		return;
-	}
+	// // MIYOO MINI
+	// if ((dst==SDL_VideoSurface->pixels && !(SDL_VideoSurface->flags&SDL_DOUBLEBUF)) || src==SDL_VideoSurface->pixels) {
+	// 	Blit180((uint32_t*)dst,(uint32_t*)src);
+	// 	return;
+	// }
 
 	w = info->d_width*info->dst->BytesPerPixel;
 	h = info->d_height;
