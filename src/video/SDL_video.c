@@ -61,7 +61,9 @@ static pthread_cond_t		flip_req;
 
 //
 //	Actual Flip thread
-//		rev4 : TRIPLEBUF +1
+//		rev4 : TRIPLEBUF +1 
+//		rev5 : reduced to DOUBLEBUF (change 2 instances of 960 back to 1440 and `now_flipping < 1` to 2 to restore)
+// 			
 //
 static void* GFX_FlipThread(void* param) {
 	uint32_t	target_offset;
@@ -70,7 +72,7 @@ static void* GFX_FlipThread(void* param) {
 		pthread_cond_wait(&flip_req,&flip_mx);
 		pthread_mutex_unlock(&flip_mx);
 		do {	target_offset = vinfo.yoffset + 480;
-			if ( target_offset == 1440 ) target_offset = 0;
+			if ( target_offset == 960 ) target_offset = 0;
 			vinfo.yoffset = target_offset;
 			ioctl(fd_fb, FBIOPAN_DISPLAY, &vinfo);
 			now_flipping--;
@@ -88,8 +90,8 @@ static void* GFX_FlipThread(void* param) {
 static void	GFX_Flip(SDL_Surface *surface) {
 	MI_U16		Fence;
 	uint32_t	target_offset;
-
-	if ((now_flipping < 2)&&(surface->pixelsPa)) {
+	
+	if ((now_flipping < 1)&&(surface->pixelsPa)) {
 		stSrc.phyAddr = surface->pixelsPa;
 		if (surface->format->BytesPerPixel == 2) {
 			stSrc.eColorFmt = E_MI_GFX_FMT_RGB565;
@@ -105,7 +107,7 @@ static void	GFX_Flip(SDL_Surface *surface) {
 		MI_SYS_FlushInvCache(surface->pixels, ALIGN4K(surface->pitch * surface->h));
 
 		target_offset = vinfo.yoffset + 480;
-		if ( target_offset == 1440 ) target_offset = 0;
+		if ( target_offset == 960 ) target_offset = 0;
 		stDst.phyAddr = fb_phyAddr + (640*target_offset*4);
 
 		MI_GFX_BitBlit(&stSrc,&stSrcRect,&stDst,&stDstRect,&stOpt,&Fence);
