@@ -39,6 +39,8 @@
 #include <mi_sys.h>
 #include <mi_gfx.h>
 
+static SDL_Surface * _SDL_SetVideoMode (int width, int height, int bpp, Uint32 flags);
+
 #define MIYOO_MINI_GFX
 
 #if defined(MIYOO_MINI_GFX)
@@ -89,7 +91,7 @@ static void* GFX_FlipThread(void* param) {
 //		rev4 : TRIPLEBUF +1
 //		rev5 : overwrite when now_flipping == 2
 //
-void	GFX_Flip(SDL_Surface *surface) {
+static void	GFX_Flip(SDL_Surface *surface) {
 	MI_U16		Fence;
 	uint32_t	target_offset;
 
@@ -132,8 +134,7 @@ void	GFX_Flip(SDL_Surface *surface) {
 //
 static void	GFX_Init(void) {
 	if (fd_fb == 0) {
-		// GFX_Init is now called _by_ SDL_SetVideoMode. Initception!
-		// SDL_SetVideoMode(640, 480, 32, SDL_SWSURFACE);
+		_SDL_SetVideoMode(640, 480, 32, SDL_SWSURFACE);
 		MI_SYS_Init();
 		MI_GFX_Open();
 
@@ -785,7 +786,7 @@ static void SDL_CreateShadowSurface(int depth)
 /*
  * Set the requested video mode, allocating a shadow buffer if necessary.
  */
-SDL_Surface * _SDL_SetVideoMode (int width, int height, int bpp, Uint32 flags)
+static SDL_Surface * _SDL_SetVideoMode (int width, int height, int bpp, Uint32 flags)
 {
 	SDL_VideoDevice *video, *this;
 	SDL_Surface *prev_mode, *mode;
@@ -1131,8 +1132,6 @@ SDL_Surface * SDL_SetVideoMode (int width, int height, int bpp, Uint32 flags) { 
 	SDL_Surface* ready_to_go = NULL;
 
 	if (SDL_PublicSurface && SDL_PublicSurface->pixelsPa) ready_to_go = SDL_PublicSurface;
-
-	_SDL_SetVideoMode(640,480,32,SDL_SWSURFACE);
 
 	GFX_Init();
 
