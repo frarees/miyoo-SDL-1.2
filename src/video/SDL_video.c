@@ -61,8 +61,8 @@ static pthread_cond_t		flip_req;
 
 //
 //	Actual Flip thread
-//		rev4 : TRIPLEBUF +1 
-//		rev5 : reduced to DOUBLEBUF (change 2 instances of 960 back to 1440 and `now_flipping < 1` to 2 to restore)
+//		rev4 	: TRIPLEBUF +1 
+//		rev4mod : reduced to DOUBLEBUF (change 2 instances of 960 back to 1440 and `now_flipping < 1` to 2 to restore)
 // 			
 //
 static void* GFX_FlipThread(void* param) {
@@ -219,7 +219,7 @@ static void	GFX_FreeSurface(SDL_Surface *surface) {
 	}
 }
 
-#endif
+#endif // defined(MIYOO_MINI_GFX)
 
 /* Available video drivers */
 static VideoBootStrap *bootstrap[] = {
