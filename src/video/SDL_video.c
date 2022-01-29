@@ -47,36 +47,38 @@ static SDL_Surface * _SDL_SetVideoMode (int width, int height, int bpp, Uint32 f
 
 #define	pixelsPa	unused1
 #define ALIGN4K(val)	((val+4095)>>12)<<12
+#define BLOCKING	// Limited to 60fps but never skips frames
 
-static int			fd_fb = 0;
-static struct			fb_fix_screeninfo finfo;
-static struct			fb_var_screeninfo vinfo;
-static MI_PHY			fb_phyAddr;
-static MI_GFX_Surface_t	stSrc;
-static MI_GFX_Rect_t		stSrcRect;
-static MI_GFX_Surface_t	stDst;
-static MI_GFX_Rect_t		stDstRect;
-static MI_GFX_Opt_t		stOpt;
-static volatile uint32_t	now_flipping;
-static pthread_t		flip_pt;
-static pthread_mutex_t		flip_mx;
-static pthread_cond_t		flip_req;
+int			fd_fb = 0;
+struct			fb_fix_screeninfo finfo;
+struct			fb_var_screeninfo vinfo;
+MI_PHY			fb_phyAddr;
+MI_GFX_Surface_t	stSrc;
+MI_GFX_Rect_t		stSrcRect;
+MI_GFX_Surface_t	stDst;
+MI_GFX_Rect_t		stDstRect;
+MI_GFX_Opt_t		stOpt;
+volatile uint32_t	now_flipping;
+pthread_t		flip_pt;
+pthread_mutex_t		flip_mx;
+pthread_cond_t		flip_req;
+pthread_cond_t		flip_start;
 
 //
 //	Actual Flip thread
-//		rev4 : TRIPLEBUF +1
+//		rev6 : TRIPLEBUF + Shadow + Blocking
 //
 static void* GFX_FlipThread(void* param) {
 	uint32_t	target_offset;
 	while(1) {
 		pthread_mutex_lock(&flip_mx);
-		pthread_cond_wait(&flip_req,&flip_mx);
+		pthread_cond_wait(&flip_req, &flip_mx);
 		do {	target_offset = vinfo.yoffset + 480;
 			if ( target_offset == 1440 ) target_offset = 0;
 			vinfo.yoffset = target_offset;
+			pthread_cond_signal(&flip_start);
 			pthread_mutex_unlock(&flip_mx);
 			ioctl(fd_fb, FBIOPAN_DISPLAY, &vinfo);
-//			if (now_flipping == 2) usleep(1);	// try this if no effect
 			pthread_mutex_lock(&flip_mx);
 		} while(--now_flipping);
 		pthread_mutex_unlock(&flip_mx);
@@ -87,9 +89,8 @@ static void* GFX_FlipThread(void* param) {
 //
 //	GFX Flip
 //		HW Blit : surface -> FB(backbuffer) with Rotate180/bppConvert/Scaling
-//		and Request Flip
-//		rev4 : TRIPLEBUF +1
-//		rev5 : overwrite when now_flipping == 2
+//			and Request Flip
+//		rev6 : TRIPLEBUF + Shadow + Blocking
 //
 static void	GFX_Flip(SDL_Surface *surface) {
 	MI_U16		Fence;
@@ -111,16 +112,24 @@ static void	GFX_Flip(SDL_Surface *surface) {
 		MI_SYS_FlushInvCache(surface->pixels, ALIGN4K(surface->pitch * surface->h));
 
 		pthread_mutex_lock(&flip_mx);
+#ifdef BLOCKING	// Blocking TRIPLE
+		while (now_flipping == 2) {
+			flip_start = (pthread_cond_t)PTHREAD_COND_INITIALIZER;
+			pthread_cond_wait(&flip_start, &flip_mx);
+		}
+#endif
 		target_offset = vinfo.yoffset + 480;
 		if ( target_offset == 1440 ) target_offset = 0;
 		stDst.phyAddr = fb_phyAddr + (640*target_offset*4);
-		MI_GFX_BitBlit(&stSrc,&stSrcRect,&stDst,&stDstRect,&stOpt,&Fence);
+		MI_GFX_BitBlit(&stSrc, &stSrcRect, &stDst, &stDstRect, &stOpt, &Fence);
 		MI_GFX_WaitAllDone(FALSE, Fence);
 
 		// Request Flip
 		if (now_flipping == 0) {
 			now_flipping = 1;
+			flip_start = (pthread_cond_t)PTHREAD_COND_INITIALIZER;
 			pthread_cond_signal(&flip_req);
+			pthread_cond_wait(&flip_start, &flip_mx);
 		} else {
 			now_flipping = 2;
 		}
@@ -142,9 +151,7 @@ static void	GFX_Init(void) {
 		ioctl(fd_fb, FBIOGET_FSCREENINFO, &finfo);
 		fb_phyAddr = finfo.smem_start;
 		ioctl(fd_fb, FBIOGET_VSCREENINFO, &vinfo);
-
-		fprintf(stdout, "vinfo.yres_virtual: %d\n", vinfo.yres_virtual);
-		
+		vinfo.yres_virtual = 1440;
 		vinfo.yoffset = 0;
 		ioctl(fd_fb, FBIOPUT_VSCREENINFO, &vinfo);
 		MI_SYS_MemsetPa(fb_phyAddr, 0, 640*480*4*3);
