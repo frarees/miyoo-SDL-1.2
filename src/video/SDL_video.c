@@ -1143,6 +1143,10 @@ SDL_Surface * SDL_SetVideoMode (int width, int height, int bpp, Uint32 flags) { 
 	GFX_Init();
 
 	if (ready_to_go) GFX_FreeSurface(ready_to_go);
+	
+	// NOTE: this is probably a probe for native resolution
+	if (width==0) width = 640;
+	if (height==0) height = 480;
 
 	SDL_PublicSurface = GFX_CreateRGBSurface(0,width,height,bpp,0,0,0,0);
 
