@@ -55,8 +55,8 @@
 #define GPM_NODE_FIFO	"/dev/gpmdata"
 #endif
 
-/*#define DEBUG_KEYBOARD*/
-/*#define DEBUG_MOUSE*/
+// #define DEBUG_KEYBOARD
+// #define DEBUG_MOUSE
 
 /* The translation tables from a console scancode to a SDL keysym */
 #define NUM_VGAKEYMAPS	(1<<KG_CAPSSHIFT)
@@ -1119,6 +1119,9 @@ void FB_InitOSKeymap(_THIS)
 	  case SCANCODE_RIGHTALT:
 	    keymap[i] = SDLK_RALT;
 	    break;
+	  case SCANCODE_POWER:
+	    keymap[i] = SDLK_POWER;
+		break;
 	  case 127:
 	    keymap[i] = SDLK_MENU;
 	    break;
@@ -1205,6 +1208,10 @@ static SDL_keysym *TranslateKey(int scancode, SDL_keysym *keysym)
 	keysym->scancode = scancode;
 	keysym->sym = keymap[scancode];
 	keysym->mod = KMOD_NONE;
+	
+#ifdef DEBUG_KEYBOARD
+	fprintf(stdout, "scancode: %d sym: %d\n", scancode, keymap[scancode]);
+#endif
 
 	/* If UNICODE is on, get the UNICODE value for the key */
 	keysym->unicode = 0;
