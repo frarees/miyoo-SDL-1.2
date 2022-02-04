@@ -47,8 +47,8 @@ static SDL_Surface * _SDL_SetVideoMode (int width, int height, int bpp, Uint32 f
 
 #define	pixelsPa	unused1
 #define ALIGN4K(val)	((val+4095)>>12)<<12
-#define BLOCKING	// Limited to 60fps but never skips frames
 
+int 	 blocking = 1; // Limited to 60fps but never skips frames
 int			fd_fb = 0;
 struct			fb_fix_screeninfo finfo;
 struct			fb_var_screeninfo vinfo;
@@ -112,12 +112,10 @@ static void	GFX_Flip(SDL_Surface *surface) {
 		MI_SYS_FlushInvCache(surface->pixels, ALIGN4K(surface->pitch * surface->h));
 
 		pthread_mutex_lock(&flip_mx);
-#ifdef BLOCKING	// Blocking TRIPLE
-		while (now_flipping == 2) {
+		while (blocking && now_flipping == 2) {
 			flip_start = (pthread_cond_t)PTHREAD_COND_INITIALIZER;
 			pthread_cond_wait(&flip_start, &flip_mx);
 		}
-#endif
 		target_offset = vinfo.yoffset + 480;
 		if ( target_offset == 1440 ) target_offset = 0;
 		stDst.phyAddr = fb_phyAddr + (640*target_offset*4);
@@ -1137,6 +1135,11 @@ static SDL_Surface * _SDL_SetVideoMode (int width, int height, int bpp, Uint32 f
 SDL_Surface * SDL_SetVideoMode (int width, int height, int bpp, Uint32 flags) { // flags is unused
 #if defined(MIYOO_MINI_GFX)
 	SDL_Surface* ready_to_go = NULL;
+	
+	const char* env = SDL_getenv("GFX_BLOCKING");
+	if ( env ) {
+		blocking = SDL_atoi(env) ? 1 : 0;
+	}
 
 	if (SDL_PublicSurface && SDL_PublicSurface->pixelsPa) ready_to_go = SDL_PublicSurface;
 
