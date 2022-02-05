@@ -88,6 +88,10 @@ AudioBootStrap MIAO_bootstrap = {
 	Audio_Available, Audio_CreateDevice
 };
 
+#define	USLEEP_MIN		0	// Threshold time for reading ahead without usleep
+					//	when the time remaining until the next frame is less
+					// (usleep resolution is 10000us(10ms) in the case of miyoomini)
+
 static struct timeval tod;
 static int usleepclock;
 static uint64_t startclock;
@@ -105,7 +109,7 @@ static void MIAO_WaitAudio(_THIS)
 	
 	gettimeofday(&tod, NULL);
 	usleepclock = framecounter * clock_freqframes / this->spec.freq + startclock - (tod.tv_usec + tod.tv_sec * 1000000);
-	if (usleepclock > 0) usleep(usleepclock);
+	if (usleepclock > USLEEP_MIN) usleep(usleepclock - USLEEP_MIN);
 }
 
 static void MIAO_PlayAudio(_THIS)
@@ -188,7 +192,15 @@ static int MIAO_OpenAudio(_THIS, SDL_AudioSpec *spec)
 	MI_AO_EnableChn(0,0);
 	MI_AO_ClearChnBuf(0,0);
 	
-	for (int i=0; i<2; i++) {
+	// if I undestand correctly this initial buffer 
+	// is to counteract the Miyoo Mini's usleep
+	// interval of 10ms
+	int num_frames = 2;
+	if (spec->samples<512) num_frames *= 2;
+	if (spec->samples<256) num_frames *= 2;
+	if (spec->samples<128) num_frames *= 2;
+	if (spec->samples< 64) num_frames *= 2;
+	for (int i=num_frames; i>0; i--) {
 		MI_AO_SendFrame(0, 0, frame, 0);
 	}
 	
