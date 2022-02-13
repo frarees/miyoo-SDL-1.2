@@ -42,6 +42,7 @@
 static SDL_Surface * _SDL_SetVideoMode (int width, int height, int bpp, Uint32 flags);
 
 #define MIYOO_MINI_GFX
+#define DEBUG_VIDEO
 
 #if defined(MIYOO_MINI_GFX)
 
@@ -220,6 +221,8 @@ static SDL_Surface*	GFX_CreateRGBSurface(uint32_t flags, int width, int height, 
 //	Free GFX Surface / almost same as SDL_FreeSurface
 //
 static void	GFX_FreeSurface(SDL_Surface *surface) {
+	if (surface==NULL) return;
+		
 	MI_PHY		phyAddr = surface->pixelsPa;
 	void*		virAddr = surface->pixels;
 	uint32_t	size = surface->pitch * surface->h;
@@ -1137,11 +1140,9 @@ SDL_Surface * SDL_SetVideoMode (int width, int height, int bpp, Uint32 flags) { 
 	SDL_Surface* ready_to_go = NULL;
 	
 	const char* env = SDL_getenv("GFX_BLOCKING");
-	if ( env ) {
-		blocking = SDL_atoi(env) ? 1 : 0;
-	}
+	if ( env ) blocking = SDL_atoi(env) ? 1 : 0;
 
-	if (SDL_PublicSurface && SDL_PublicSurface->pixelsPa) ready_to_go = SDL_PublicSurface;
+	if (current_video && SDL_PublicSurface && SDL_PublicSurface->pixelsPa) ready_to_go = SDL_PublicSurface;
 
 	GFX_Init();
 
@@ -1591,8 +1592,13 @@ int SDL_SetColors(SDL_Surface *screen, SDL_Color *colors, int firstcolor,
 void SDL_VideoQuit (void)
 {
 #if defined(MIYOO_MINI_GFX)
-	GFX_FreeSurface(SDL_PublicSurface);
-	GFX_Quit();
+	if (fd_fb) {
+		if (current_video && SDL_PublicSurface && SDL_PublicSurface->pixelsPa) {
+			GFX_FreeSurface(SDL_PublicSurface);
+			SDL_PublicSurface = NULL;
+		}
+		GFX_Quit();
+	}
 #endif
 	SDL_Surface *ready_to_go;
 
