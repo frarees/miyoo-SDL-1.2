@@ -42,7 +42,7 @@
 static SDL_Surface * _SDL_SetVideoMode (int width, int height, int bpp, Uint32 flags);
 
 #define MIYOO_MINI_GFX
-#define DEBUG_VIDEO
+// #define DEBUG_VIDEO
 
 #if defined(MIYOO_MINI_GFX)
 
@@ -418,6 +418,10 @@ int SDL_VideoInit (const char *driver_name, Uint32 flags)
 	}
 	current_video = video;
 	current_video->name = bootstrap[i]->name;
+	
+#if defined DEBUG_VIDEO
+	fprintf(stdout, "init SDL video name: %s\n", video->name);
+#endif
 
 	/* Do some basic variable initialization */
 	video->screen = NULL;
@@ -1151,7 +1155,11 @@ SDL_Surface * SDL_SetVideoMode (int width, int height, int bpp, Uint32 flags) { 
 	// NOTE: this is probably a probe for native resolution
 	if (width==0) width = 640;
 	if (height==0) height = 480;
-
+	
+#if defined DEBUG_VIDEO
+	fprintf(stdout, "set SDL video mode: %ix%i (%i)\n", width, height, bpp);
+#endif
+		
 	SDL_PublicSurface = GFX_CreateRGBSurface(0,width,height,bpp,0,0,0,0);
 
 	return(SDL_PublicSurface);
@@ -1593,6 +1601,9 @@ void SDL_VideoQuit (void)
 {
 #if defined(MIYOO_MINI_GFX)
 	if (fd_fb) {
+#if defined DEBUG_VIDEO
+		fprintf(stdout, "quit SDL video, cleanup GFX\n");
+#endif
 		if (current_video && SDL_PublicSurface && SDL_PublicSurface->pixelsPa) {
 			GFX_FreeSurface(SDL_PublicSurface);
 			SDL_PublicSurface = NULL;
