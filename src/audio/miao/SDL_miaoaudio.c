@@ -191,7 +191,6 @@ static int MIAO_OpenAudio(_THIS, SDL_AudioSpec *spec)
 	if (MI_AO_SetPubAttr(0,&attr)) return(-1);
 	if (MI_AO_Enable(0)) return(-1);
 	if (MI_AO_EnableChn(0,0)) return(-1);
-	if (MI_AO_SetVolume(0,0)) return -1;
 	if (MI_AO_ClearChnBuf(0,0)) return(-1);
 
 	mixlen = spec->size;
