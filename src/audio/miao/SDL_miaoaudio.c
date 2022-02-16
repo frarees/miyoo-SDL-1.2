@@ -88,6 +88,8 @@ AudioBootStrap MIAO_bootstrap = {
 	Audio_Available, Audio_CreateDevice
 };
 
+// based on AO_rev5
+
 static struct timeval tod;
 static int usleepclock;
 static uint64_t startclock;
@@ -160,6 +162,10 @@ static void MIAO_CloseAudio(_THIS)
 	}
 }
 
+//		signed 16bit only
+//		sampling rate: 8/11.025/12/16/22.05/24/32/44.1/48kHz
+//		samples should be 2048 or less
+
 static int MIAO_OpenAudio(_THIS, SDL_AudioSpec *spec)
 {
 	fprintf(stdout, "open miao audio\n");
@@ -185,6 +191,7 @@ static int MIAO_OpenAudio(_THIS, SDL_AudioSpec *spec)
 	if (MI_AO_SetPubAttr(0,&attr)) return(-1);
 	if (MI_AO_Enable(0)) return(-1);
 	if (MI_AO_EnableChn(0,0)) return(-1);
+	if (MI_AO_SetVolume(0,0)) return -1;
 	if (MI_AO_ClearChnBuf(0,0)) return(-1);
 
 	mixlen = spec->size;
