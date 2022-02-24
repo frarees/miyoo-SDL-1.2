@@ -46,13 +46,20 @@ static SDL_Surface * _SDL_SetVideoMode (int width, int height, int bpp, Uint32 f
 
 #if defined(MIYOO_MINI_GFX)
 
-// basd on GFX_rev9
+// basd on GFX_rev10
 
 #define	pixelsPa	unused1
 #define ALIGN4K(val)	((val+4095)&(~4095))
 
-uint32_t blocking = 1; // Limited to 60fps but never skips frames
-uint32_t	 wait = 1; // wait until Blit is done when flip
+//	GFX_BLOCKING	: limit to 60fps but never skips frames
+//			:  in case of clearing all buffers by GFX_Flip()x3, needs to use BLOCKING (or GFX_FlipForce())
+//	GFX_FLIPWAIT	: wait until Blit is done when flip
+//			:  when NOWAIT, do not clear/write source surface immediately after Flip
+//			:  if absolutely necessary, use GFX_WaitAllDone() before write (or GFX_FlipWait())
+enum { GFX_BLOCKING = 1, GFX_FLIPWAIT = 2 };
+//#define	DEFAULTFLIPFLAGS	(GFX_BLOCKING | GFX_FLIPWAIT)		// versatile but slower
+#define	DEFAULTFLIPFLAGS	0					// high performance
+
 int			fd_fb = 0;
 struct			fb_fix_screeninfo finfo;
 struct			fb_var_screeninfo vinfo;
@@ -62,20 +69,25 @@ MI_GFX_Rect_t		stSrcRect;
 MI_GFX_Surface_t	stDst;
 MI_GFX_Rect_t		stDstRect;
 MI_GFX_Opt_t		stOpt;
-MI_PHY			shadowPa = 0;
 volatile uint32_t	now_flipping;
+MI_PHY			shadowPa;
+uint32_t		shadowsize;
 pthread_t		flip_pt;
 pthread_mutex_t		flip_mx;
 pthread_cond_t		flip_req;
 pthread_cond_t		flip_start;
-MI_U16			flipFence = 0;
+MI_U16			flipFence;
+uint32_t		flipFlags;
 
 static void GFX_UpdateFlags(void) {
 	const char* env;
+	flipFlags = DEFAULTFLIPFLAGS;
+
 	env = SDL_getenv("GFX_BLOCKING");
-	if ( env ) blocking = SDL_atoi(env) ? 1 : 0;
-	env = SDL_getenv("GFX_WAIT");
-	if ( env ) wait = SDL_atoi(env) ? 1 : 0;
+	if (env && SDL_atoi(env)) flipFlags |= GFX_BLOCKING;
+
+	env = SDL_getenv("GFX_FLIPWAIT");
+	if (env && SDL_atoi(env)) flipFlags |= GFX_FLIPWAIT;
 }
 
 //
@@ -86,9 +98,9 @@ static void GFX_UpdateFlags(void) {
 static void* GFX_FlipThread(void* param) {
 	uint32_t	target_offset;
 	MI_U16		Fence;
+	pthread_mutex_lock(&flip_mx);
 	while(1) {
-		pthread_mutex_lock(&flip_mx);
-		pthread_cond_wait(&flip_req, &flip_mx);
+		while (now_flipping == 0) pthread_cond_wait(&flip_req, &flip_mx);
 		Fence = flipFence;
 		do {	target_offset = vinfo.yoffset + 480;
 			if ( target_offset == 1440 ) target_offset = 0;
@@ -99,7 +111,6 @@ static void* GFX_FlipThread(void* param) {
 			ioctl(fd_fb, FBIOPAN_DISPLAY, &vinfo);
 			pthread_mutex_lock(&flip_mx);
 		} while(--now_flipping);
-		pthread_mutex_unlock(&flip_mx);
 	}
 	return 0;
 }
@@ -164,7 +175,7 @@ static void	GFX_Flip(SDL_Surface *surface) {
 	static uint32_t	shadowsize = 0;
 	uint32_t	target_offset, surfacesize;
 
-	if ((surface != NULL)&&(surface->pixelsPa)) {
+	if ((fd_fb)&&(surface != NULL)&&(surface->pixelsPa)) {
 		surfacesize = surface->pitch * surface->h;
 		stSrc.eColorFmt = GFX_ColorFmt(surface);
 		stSrc.u32Width = surface->w;
@@ -173,7 +184,7 @@ static void	GFX_Flip(SDL_Surface *surface) {
 		stSrcRect.u32Width = stSrc.u32Width;
 		stSrcRect.u32Height = stSrc.u32Height;
 
-		if (wait) {
+		if (flipFlags & GFX_FLIPWAIT) {
 			if (flipFence) MI_GFX_WaitAllDone(FALSE, flipFence);
 			if (shadowsize < surfacesize) {
 				if (shadowPa) MI_SYS_MMA_Free(shadowPa);
@@ -191,12 +202,12 @@ static void	GFX_Flip(SDL_Surface *surface) {
 		}
 
 		pthread_mutex_lock(&flip_mx);
-		while (blocking && now_flipping == 2) {
-			pthread_cond_wait(&flip_start, &flip_mx);
+		if (flipFlags & GFX_BLOCKING) {
+			while (now_flipping == 2) pthread_cond_wait(&flip_start, &flip_mx);
 		}
 		target_offset = vinfo.yoffset + 480;
 		if ( target_offset == 1440 ) target_offset = 0;
-		stDst.phyAddr = fb_phyAddr + (640*target_offset*4);
+		stDst.phyAddr = finfo.smem_start + (640*target_offset*4);
 		MI_GFX_BitBlit(&stSrc, &stSrcRect, &stDst, &stDstRect, &stOpt, &flipFence);
 
 		// Request Flip
@@ -210,6 +221,35 @@ static void	GFX_Flip(SDL_Surface *surface) {
 		pthread_mutex_unlock(&flip_mx);
 	}
 }
+
+//
+//	GFX UpdateRect
+//		Flip after setting the update area
+//		*Note* blit from entire screen to framebuffer rect
+//
+void	GFX_UpdateRect(SDL_Surface *screen, int x, int y, int w, int h) {
+	if ((screen != NULL)&&(screen->pixelsPa)) {
+		if (x|y|w|h) {
+			MI_GFX_Rect_t DstRectPush = stDstRect;
+			stDstRect.s32Xpos = 640-(x+w);	// for rotate180
+			stDstRect.s32Ypos = 480-(y+h);	// 
+			stDstRect.u32Width = w;
+			stDstRect.u32Height = h;
+			GFX_Flip(screen);
+			stDstRect = DstRectPush;
+		} else {
+			GFX_Flip(screen);
+		}
+	}
+	else {
+		SDL_UpdateRect(screen, x,y,w,h);
+	}
+}
+
+//
+//	Clear entire FrameBuffer
+//
+void GFX_ClearFrameBuffer(void) { MI_SYS_MemsetPa(finfo.smem_start, 0, finfo.smem_len); }
 
 //
 //	GFX Init
@@ -228,10 +268,9 @@ static void	GFX_Init(void) {
 		ioctl(fd_fb, FBIOPUT_VSCREENINFO, &vinfo);
 
 		ioctl(fd_fb, FBIOGET_FSCREENINFO, &finfo);
-		fb_phyAddr = finfo.smem_start;
-		MI_SYS_MemsetPa(fb_phyAddr, 0, finfo.smem_len);
+		GFX_ClearFrameBuffer();
 
-		stDst.phyAddr = fb_phyAddr;
+		stDst.phyAddr = finfo.smem_start;
 		stDst.eColorFmt = E_MI_GFX_FMT_ARGB8888;
 		stDst.u32Width = 640;
 		stDst.u32Height = 480;
@@ -250,7 +289,8 @@ static void	GFX_Init(void) {
 		flip_mx = (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER;
 		flip_req = (pthread_cond_t)PTHREAD_COND_INITIALIZER;
 		flip_start = (pthread_cond_t)PTHREAD_COND_INITIALIZER;
-		now_flipping = 0;
+		now_flipping = shadowPa = shadowsize = flipFence = 0;
+		flipFlags = DEFAULTFLIPFLAGS;
 		pthread_create(&flip_pt, NULL, GFX_FlipThread, NULL);
 	}
 }
@@ -264,7 +304,7 @@ static void	GFX_Quit(void) {
 		pthread_join(flip_pt,NULL);
 		
 		if (shadowPa) MI_SYS_MMA_Free(shadowPa);
-		MI_SYS_MemsetPa(fb_phyAddr, 0, finfo.smem_len);
+		GFX_ClearFrameBuffer();
 		vinfo.yoffset = 0;
 		ioctl(fd_fb, FBIOPUT_VSCREENINFO, &vinfo);
 		close(fd_fb);

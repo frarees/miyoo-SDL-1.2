@@ -117,7 +117,7 @@ static void MIAO_WaitAudio(_THIS)
 		framecounter = 0;
 		gettimeofday(&tod, NULL);
 		startclock = tod.tv_usec + tod.tv_sec * 1000000;
-	} else if (usleepclock > 0) usleep(usleepclock);
+	} else if (usleepclock > 0) SDL_Delay(usleepclock / 1000 + 1);
 }
 
 static void MIAO_PlayAudio(_THIS)
