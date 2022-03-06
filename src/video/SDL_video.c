@@ -100,7 +100,7 @@ static void* GFX_FlipThread(void* param) {
 	MI_U16		Fence;
 	pthread_mutex_lock(&flip_mx);
 	while(1) {
-		while (now_flipping == 0) pthread_cond_wait(&flip_req, &flip_mx);
+		while (!now_flipping) pthread_cond_wait(&flip_req, &flip_mx);
 		Fence = flipFence;
 		do {	target_offset = vinfo.yoffset + 480;
 			if ( target_offset == 1440 ) target_offset = 0;
@@ -141,24 +141,6 @@ MI_GFX_ColorFmt_e	GFX_ColorFmt(SDL_Surface *surface) {
 		if (surface->format->Rmask == 0x000000FF) return E_MI_GFX_FMT_ABGR8888;
 	}
 	return E_MI_GFX_FMT_ARGB8888;
-}
-
-//
-//	Get SYS_PixelFormat from SDL_Surface
-//
-MI_SYS_PixelFormat_e	SYS_PixelFormat(SDL_Surface *surface) {
-	if (surface != NULL) {
-		if (surface->format->BytesPerPixel == 2) {
-			if (surface->format->Amask == 0) return E_MI_SYS_PIXEL_FRAME_RGB565;
-			if (surface->format->Amask == 0x8000) return E_MI_SYS_PIXEL_FRAME_ARGB1555;
-			if (surface->format->Amask == 0xF000) return E_MI_SYS_PIXEL_FRAME_ARGB4444;
-			return E_MI_SYS_PIXEL_FRAME_RGB565;
-		}
-		if (surface->format->Bmask == 0x000000FF) return E_MI_SYS_PIXEL_FRAME_ARGB8888;
-		if (surface->format->Amask == 0x000000FF) return E_MI_SYS_PIXEL_FRAME_BGRA8888;
-		if (surface->format->Rmask == 0x000000FF) return E_MI_SYS_PIXEL_FRAME_ABGR8888;
-	}
-	return E_MI_SYS_PIXEL_FRAME_ARGB8888;
 }
 
 //
@@ -223,30 +205,6 @@ static void	GFX_Flip(SDL_Surface *surface) {
 }
 
 //
-//	GFX UpdateRect
-//		Flip after setting the update area
-//		*Note* blit from entire screen to framebuffer rect
-//
-void	GFX_UpdateRect(SDL_Surface *screen, int x, int y, int w, int h) {
-	if ((screen != NULL)&&(screen->pixelsPa)) {
-		if (x|y|w|h) {
-			MI_GFX_Rect_t DstRectPush = stDstRect;
-			stDstRect.s32Xpos = 640-(x+w);	// for rotate180
-			stDstRect.s32Ypos = 480-(y+h);	// 
-			stDstRect.u32Width = w;
-			stDstRect.u32Height = h;
-			GFX_Flip(screen);
-			stDstRect = DstRectPush;
-		} else {
-			GFX_Flip(screen);
-		}
-	}
-	else {
-		SDL_UpdateRect(screen, x,y,w,h);
-	}
-}
-
-//
 //	Clear entire FrameBuffer
 //
 void GFX_ClearFrameBuffer(void) { MI_SYS_MemsetPa(finfo.smem_start, 0, finfo.smem_len); }
@@ -302,7 +260,8 @@ static void	GFX_Quit(void) {
 	if (fd_fb) {
 		pthread_cancel(flip_pt);
 		pthread_join(flip_pt,NULL);
-		
+
+		MI_GFX_WaitAllDone(TRUE, 0);
 		if (shadowPa) MI_SYS_MMA_Free(shadowPa);
 		GFX_ClearFrameBuffer();
 		vinfo.yoffset = 0;
@@ -330,7 +289,10 @@ static SDL_Surface*	GFX_CreateRGBSurface(uint32_t flags, int width, int height, 
 	int		pitch = width * (uint32_t)(depth/8);
 	uint32_t	size = pitch * height;
 
-	if (MI_SYS_MMA_Alloc(NULL, ALIGN4K(size), &phyAddr)) return NULL;
+	if (MI_SYS_MMA_Alloc(NULL, ALIGN4K(size), &phyAddr)) {
+		// No MMA left .. create normal SDL surface
+		return SDL_CreateRGBSurface(flags,width,height,depth,Rmask,Gmask,Bmask,Amask);
+	}
 	MI_SYS_MemsetPa(phyAddr, 0, size);
 	MI_SYS_Mmap(phyAddr, ALIGN4K(size), &virAddr, TRUE);	// write cache ON needs Flush when r/w Pa directly
 
@@ -353,6 +315,27 @@ static void	GFX_FreeSurface(SDL_Surface *surface) {
 	if (phyAddr) {
 		MI_SYS_Munmap(virAddr, ALIGN4K(size));
 		MI_SYS_MMA_Free(phyAddr);
+	}
+}
+
+//
+//	GFX UpdateRect
+//		Flip after setting the update area
+//		*Note* blit from entire screen to framebuffer rect
+//
+void GFX_UpdateRect(SDL_Surface *screen, int x, int y, int w, int h) {
+	if (screen->pixelsPa) {
+		if (x|y|w|h) {
+			MI_GFX_Rect_t DstRectPush = stDstRect;
+			stDstRect.s32Xpos = x;
+			stDstRect.s32Ypos = y;
+			stDstRect.u32Width = w;
+			stDstRect.u32Height = h;
+			GFX_Flip(screen);
+			stDstRect = DstRectPush;
+		} else {
+			GFX_Flip(screen);
+		}
 	}
 }
 
@@ -1267,11 +1250,11 @@ SDL_Surface * SDL_SetVideoMode (int width, int height, int bpp, Uint32 flags) { 
 #if defined(MIYOO_MINI_GFX)
 	SDL_Surface* ready_to_go = NULL;
 
-	GFX_UpdateFlags();
-
 	if (current_video && SDL_PublicSurface && SDL_PublicSurface->pixelsPa) ready_to_go = SDL_PublicSurface;
 
 	GFX_Init();
+
+	GFX_UpdateFlags();
 
 	if (ready_to_go) GFX_FreeSurface(ready_to_go);
 	
@@ -1383,26 +1366,41 @@ SDL_Surface *SDL_DisplayFormatAlpha(SDL_Surface *surface)
  * Update a specific portion of the physical screen
  */
 void SDL_UpdateRect(SDL_Surface *screen, Sint32 x, Sint32 y, Uint32 w, Uint32 h)
-{
+{	
 	if ( screen ) {
-		SDL_Rect rect;
+		if (screen->pixelsPa) {
+			if (x|y|w|h) {
+				MI_GFX_Rect_t DstRectPush = stDstRect;
+				stDstRect.s32Xpos = x;
+				stDstRect.s32Ypos = y;
+				stDstRect.u32Width = w;
+				stDstRect.u32Height = h;
+				GFX_Flip(screen);
+				stDstRect = DstRectPush;
+			} else {
+				GFX_Flip(screen);
+			}
+		}
+		else {
+			SDL_Rect rect;
 
-		/* Perform some checking */
-		if ( w == 0 )
-			w = screen->w;
-		if ( h == 0 )
-			h = screen->h;
-		if ( (int)(x+w) > screen->w )
-			return;
-		if ( (int)(y+h) > screen->h )
-			return;
+			/* Perform some checking */
+			if ( w == 0 )
+				w = screen->w;
+			if ( h == 0 )
+				h = screen->h;
+			if ( (int)(x+w) > screen->w )
+				return;
+			if ( (int)(y+h) > screen->h )
+				return;
 
-		/* Fill the rectangle */
-		rect.x = (Sint16)x;
-		rect.y = (Sint16)y;
-		rect.w = (Uint16)w;
-		rect.h = (Uint16)h;
-		SDL_UpdateRects(screen, 1, &rect);
+			/* Fill the rectangle */
+			rect.x = (Sint16)x;
+			rect.y = (Sint16)y;
+			rect.w = (Uint16)w;
+			rect.h = (Uint16)h;
+			SDL_UpdateRects(screen, 1, &rect);
+		}
 	}
 }
 void SDL_UpdateRects (SDL_Surface *screen, int numrects, SDL_Rect *rects)
@@ -1527,10 +1525,10 @@ int _SDL_Flip(SDL_Surface *screen)
 int SDL_Flip(SDL_Surface *screen) {
 #if defined(MIYOO_MINI_GFX)
 	GFX_Flip(screen);
-	return(0);
 #else
 	_SDL_Flip(screen);
 #endif
+	return(0);
 }
 
 static void SetPalette_logical(SDL_Surface *screen, SDL_Color *colors,
