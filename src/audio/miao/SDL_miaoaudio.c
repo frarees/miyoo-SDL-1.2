@@ -88,14 +88,29 @@ AudioBootStrap MIAO_bootstrap = {
 	Audio_Available, Audio_CreateDevice
 };
 
-// based on AO_rev5
+// based on AO_rev6
+
+#define	YIELD_WAIT	// Flag to wait with sched_yield() when the wait time is less than 10.5ms
+			// ( callback function will be called at more precise timing,
+			//   but may cause blocking/slowdown of low-priority daemons/threads execution )
+#ifdef	YIELD_WAIT
+#include <sched.h>
+#ifndef	SCHED_IDLE
+#define SCHED_IDLE	5
+#endif
+#endif
 
 static struct timeval tod;
 static int usleepclock;
 static uint64_t startclock;
+static uint64_t targetclock;
 static uint64_t clock_freqframes;
 static uint32_t framecounter;
 static uint32_t num_frames;
+#ifdef	YIELD_WAIT
+static int policy;
+static struct sched_param scprm;
+#endif
 
 /* This function waits until it is possible to write a full sound buffer */
 static void MIAO_WaitAudio(_THIS)
@@ -105,7 +120,7 @@ static void MIAO_WaitAudio(_THIS)
 		framecounter = 0;
 		startclock += clock_freqframes;
 	}
-	
+	targetclock = framecounter * clock_freqframes / this->spec.freq + startclock;
 	gettimeofday(&tod, NULL);
 	usleepclock = framecounter * clock_freqframes / this->spec.freq + startclock - (tod.tv_usec + tod.tv_sec * 1000000);
 	// check 300ms under/overrun (1frame max = 256ms at 8kHz/2048samples)
@@ -117,7 +132,20 @@ static void MIAO_WaitAudio(_THIS)
 		framecounter = 0;
 		gettimeofday(&tod, NULL);
 		startclock = tod.tv_usec + tod.tv_sec * 1000000;
-	} else if (usleepclock > 0) SDL_Delay(usleepclock / 1000 + 1);
+	} else if (usleepclock > 0) {
+#ifdef	YIELD_WAIT
+			// rev6 : wait process for miyoomini with 10ms sleep precision
+			if (usleepclock > 10500) usleep(usleepclock - 10500);	// 0.5ms margin
+			// wait for less than 10.5ms with sched_yield()
+			sched_setscheduler(0, SCHED_IDLE, &scprm);
+			do { sched_yield(); gettimeofday(&tod, NULL);
+			} while (targetclock > (tod.tv_usec + tod.tv_sec * 1000000));
+			sched_setscheduler(0, policy, &scprm);
+#else
+			usleep(usleepclock);
+#endif
+		// SDL_Delay(usleepclock / 1000 + 1);
+	}
 }
 
 static void MIAO_PlayAudio(_THIS)
@@ -200,6 +228,11 @@ static int MIAO_OpenAudio(_THIS, SDL_AudioSpec *spec)
 		return(-1);
 	}
 	memset(mixbuf, 0, mixlen);
+	
+#ifdef	YIELD_WAIT
+	policy = sched_getscheduler(0);
+	scprm.sched_priority = 0;
+#endif
 	
 	frame = (MI_AUDIO_Frame_t*)SDL_AllocAudioMem(sizeof(MI_AUDIO_Frame_t));
 	if ( frame == NULL ) {
