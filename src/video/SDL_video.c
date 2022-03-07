@@ -50,7 +50,8 @@ static SDL_Surface * _SDL_SetVideoMode (int width, int height, int bpp, Uint32 f
 
 #define	pixelsPa	unused1
 #define ALIGN4K(val)	((val+4095)&(~4095))
-
+//	FREEMMA		: force free all allocated MMAs when init & quit
+#define FREEMMA
 //	GFX_BLOCKING	: limit to 60fps but never skips frames
 //			:  in case of clearing all buffers by GFX_Flip()x3, needs to use BLOCKING (or GFX_FlipForce())
 //	GFX_FLIPWAIT	: wait until Blit is done when flip
@@ -78,6 +79,45 @@ pthread_cond_t		flip_req;
 pthread_cond_t		flip_start;
 MI_U16			flipFence;
 uint32_t		flipFlags;
+#ifndef	FREEMMA
+#define			MMADBMAX	100
+uint32_t		mma_db[MMADBMAX];
+#endif
+
+#ifdef	FREEMMA
+//
+//	Free all allocated MMAs (except "daemon")
+//
+static void	freemma(void) {
+	FILE		*fp;
+	const char	*heapinfoname = "/proc/mi_modules/mi_sys_mma/mma_heap_name0";
+	char		str[256];
+	uint32_t	offset, length, usedflag;
+	uint32_t	baseaddr = finfo.smem_start - 0x021000;	// default baseaddr (tmp)
+
+	// open heap information file
+	fp = fopen(heapinfoname, "r");
+	if (fp) {
+		// skip reading until chunk information
+		do { if (fscanf(fp, "%255s", str) == EOF) { fclose(fp); return; } } while (strcmp(str,"sys-logConfig"));
+		// get MMA each chunk information and release
+		while(fscanf(fp, "%x %x %x %255s", &offset, &length, &usedflag, str) != EOF) {
+			if (!usedflag) continue; // NA
+			if (!strcmp(str,"fb_device")) { // FB .. fix baseaddr
+				baseaddr = finfo.smem_start - offset; continue;
+			}
+			if (!strcmp(str,"ao-Dev0-tmp")) continue; // ao .. Audio buffer, skip
+			// For daemon program authors, MMA allocated as "daemon" will not be released
+			if (strncmp(str,"daemon",6)) { // others except "daemon" .. release
+				if (!MI_SYS_MMA_Free(baseaddr + offset)) {
+					fprintf(stderr, "MMA_Released %s offset : %08X length : %08X\n", str, offset, length);
+				}
+			}
+		}
+		fclose(fp);
+	}
+}
+#endif
 
 static void GFX_UpdateFlags(void) {
 	const char* env;
@@ -217,7 +257,11 @@ static void	GFX_Init(void) {
 	if (fd_fb == 0) {
 		MI_SYS_Init();
 		MI_GFX_Open();
-
+#ifdef	FREEMMA
+		freemma();
+#else
+		memset(mma_db, 0, sizeof(mma_db));
+#endif
 		fd_fb = open("/dev/fb0", O_RDWR);
 
 		_SDL_SetVideoMode(640, 480, 32, SDL_SWSURFACE);
@@ -268,7 +312,18 @@ static void	GFX_Quit(void) {
 		ioctl(fd_fb, FBIOPUT_VSCREENINFO, &vinfo);
 		close(fd_fb);
 		fd_fb = 0;
-
+#ifdef	FREEMMA
+		freemma();
+#else
+		for (uint32_t i=0; i<MMADBMAX; i++) {
+			if (mma_db[i]) {
+				if (!MI_SYS_MMA_Free(mma_db[i])) {
+					fprintf(stderr, "MMA_Released offset : %08X\n", mma_db[i]);
+					mma_db[i] = 0;
+				}
+			}
+		}
+#endif
 		MI_GFX_Close();
 		MI_SYS_Exit();
 	}
@@ -293,6 +348,14 @@ static SDL_Surface*	GFX_CreateRGBSurface(uint32_t flags, int width, int height, 
 		// No MMA left .. create normal SDL surface
 		return SDL_CreateRGBSurface(flags,width,height,depth,Rmask,Gmask,Bmask,Amask);
 	}
+#ifndef	FREEMMA
+	uint32_t i;
+	for (i=0; i<MMADBMAX; i++) {
+		if (!mma_db[i]) {
+			mma_db[i] = phyAddr; break;
+		}
+	} if (i==MMADBMAX) { MI_SYS_MMA_Free(phyAddr); return NULL; }
+#endif
 	MI_SYS_MemsetPa(phyAddr, 0, size);
 	MI_SYS_Mmap(phyAddr, ALIGN4K(size), &virAddr, TRUE);	// write cache ON needs Flush when r/w Pa directly
 
@@ -315,6 +378,13 @@ static void	GFX_FreeSurface(SDL_Surface *surface) {
 	if (phyAddr) {
 		MI_SYS_Munmap(virAddr, ALIGN4K(size));
 		MI_SYS_MMA_Free(phyAddr);
+#ifndef	FREEMMA
+			for (uint32_t i=0; i<MMADBMAX; i++) {
+				if (mma_db[i] == phyAddr) {
+					mma_db[i] = 0; break;
+				}
+			}
+#endif
 	}
 }
 
