@@ -26,6 +26,8 @@
 #include <linux/input.h>
 #include <SDL/SDL.h>
 
+#include <msettings.h> // TODO: remove me
+
 /* The tag name used by MI_AO audio */
 #define MIAO_DRIVER_NAME         "miao"
 
@@ -90,7 +92,7 @@ AudioBootStrap MIAO_bootstrap = {
 
 // based on AO_rev6
 
-#define	YIELD_WAIT	// Flag to wait with sched_yield() when the wait time is less than 10.5ms
+// #define	YIELD_WAIT	// Flag to wait with sched_yield() when the wait time is less than 10.5ms
 			// ( callback function will be called at more precise timing,
 			//   but may cause blocking/slowdown of low-priority daemons/threads execution )
 #ifdef	YIELD_WAIT
@@ -134,17 +136,17 @@ static void MIAO_WaitAudio(_THIS)
 		startclock = tod.tv_usec + tod.tv_sec * 1000000;
 	} else if (usleepclock > 0) {
 #ifdef	YIELD_WAIT
-			// rev6 : wait process for miyoomini with 10ms sleep precision
-			if (usleepclock > 10500) usleep(usleepclock - 10500);	// 0.5ms margin
-			// wait for less than 10.5ms with sched_yield()
-			sched_setscheduler(0, SCHED_IDLE, &scprm);
-			do { sched_yield(); gettimeofday(&tod, NULL);
-			} while (targetclock > (tod.tv_usec + tod.tv_sec * 1000000));
-			sched_setscheduler(0, policy, &scprm);
+		// rev6 : wait process for miyoomini with 10ms sleep precision
+		if (usleepclock > 10500) usleep(usleepclock - 10500);	// 0.5ms margin
+		// wait for less than 10.5ms with sched_yield()
+		sched_setscheduler(0, SCHED_IDLE, &scprm);
+		do { sched_yield(); gettimeofday(&tod, NULL);
+		} while (targetclock > (tod.tv_usec + tod.tv_sec * 1000000));
+		sched_setscheduler(0, policy, &scprm);
 #else
-			usleep(usleepclock);
+		// usleep(usleepclock);
+		SDL_Delay(usleepclock / 1000 + 1);
 #endif
-		// SDL_Delay(usleepclock / 1000 + 1);
 	}
 }
 
@@ -178,6 +180,8 @@ static void MIAO_CloseAudio(_THIS)
 	MI_AO_ClearChnBuf(0,0);
 	MI_AO_DisableChn(0,0);
 	MI_AO_Disable(0);
+	
+	QuitSettings();
 	
 	if ( mixbuf != NULL ) {
 		SDL_FreeAudioMem(mixbuf);
@@ -220,6 +224,8 @@ static int MIAO_OpenAudio(_THIS, SDL_AudioSpec *spec)
 	if (MI_AO_Enable(0)) return(-1);
 	if (MI_AO_EnableChn(0,0)) return(-1);
 	if (MI_AO_ClearChnBuf(0,0)) return(-1);
+
+	InitSettings(); // restores volume
 
 	mixlen = spec->size;
 	mixbuf = (Uint8 *)SDL_AllocAudioMem(mixlen);
