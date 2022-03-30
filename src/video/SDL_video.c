@@ -46,6 +46,12 @@ static SDL_Surface * _SDL_SetVideoMode (int width, int height, int bpp, Uint32 f
 
 #if defined(MIYOO_MINI_GFX)
 
+static SDL_Surface* battery;
+static int hide_battery = 0;
+
+static unsigned long battery_ticks = 0;
+static int has_low_battery = 0;
+
 // basd on GFX_rev10
 
 #define	pixelsPa	unused1
@@ -128,6 +134,10 @@ static void GFX_UpdateFlags(void) {
 
 	env = SDL_getenv("GFX_FLIPWAIT");
 	if (env && SDL_atoi(env)) flipFlags |= GFX_FLIPWAIT;
+	
+	env = SDL_getenv("SDL_HIDE_BATTERY");
+	if (env && SDL_atoi(env)) hide_battery = 1;
+	
 }
 
 //
@@ -198,6 +208,26 @@ static void	GFX_Flip(SDL_Surface *surface) {
 	uint32_t	target_offset, surfacesize;
 
 	if ((fd_fb)&&(surface != NULL)&&(surface->pixelsPa)) {
+		
+		if (!hide_battery) {
+			unsigned long now = SDL_GetTicks();
+			if (!battery_ticks || now-battery_ticks>=3000) {
+				battery_ticks = now;
+				char* path = "/tmp/adc";
+				int min = 505; // was 439
+				int max = 546; // was 500
+				int value = 0;
+				FILE *file = fopen(path, "r");
+				if (file!=NULL) {
+					fscanf(file, "%i", &value);
+					fclose(file);
+				}
+				int scaled = (value - min) * 6 / (max - min);
+				has_low_battery = scaled==0;
+			}
+			if (has_low_battery) SDL_BlitSurface(battery, NULL, surface, &(SDL_Rect){602,8});
+		}
+		
 		surfacesize = surface->pitch * surface->h;
 		stSrc.eColorFmt = GFX_ColorFmt(surface);
 		stSrc.u32Width = surface->w;
@@ -673,6 +703,9 @@ int SDL_VideoInit (const char *driver_name, Uint32 flags)
 	}
 	SDL_CursorInit(flags & SDL_INIT_EVENTTHREAD);
 
+#if defined(MIYOO_MINI_GFX)
+	battery = IMG_Load("/mnt/SDCARD/.system/res/battery-sdl.png");
+#endif
 	/* We're ready to go! */
 	return(0);
 }
@@ -1792,6 +1825,7 @@ int SDL_SetColors(SDL_Surface *screen, SDL_Color *colors, int firstcolor,
 void SDL_VideoQuit (void)
 {
 #if defined(MIYOO_MINI_GFX)
+	SDL_FreeSurface(battery);
 	if (fd_fb) {
 #if defined DEBUG_VIDEO
 		fprintf(stdout, "quit SDL video, cleanup GFX\n");
