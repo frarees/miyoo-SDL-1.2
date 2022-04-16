@@ -211,6 +211,7 @@ static void	GFX_Flip(SDL_Surface *surface) {
 		
 		if (!hide_battery) {
 			unsigned long now = SDL_GetTicks();
+			int had_low_battery = has_low_battery;
 			if (!battery_ticks || now-battery_ticks>=3000) {
 				battery_ticks = now;
 				char* path = "/tmp/adc";
@@ -226,6 +227,7 @@ static void	GFX_Flip(SDL_Surface *surface) {
 				has_low_battery = scaled==0;
 			}
 			if (has_low_battery) SDL_BlitSurface(battery, NULL, surface, &(SDL_Rect){602,8});
+			else if (had_low_battery!=has_low_battery) SDL_FillRect(surface, &(SDL_Rect){602,8,battery->w,battery->h}, 0); // clear battery icon
 		}
 		
 		surfacesize = surface->pitch * surface->h;
