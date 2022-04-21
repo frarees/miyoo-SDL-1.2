@@ -89,10 +89,15 @@ Uint32 SDL_GetTicks (void)
 void SDL_Delay (Uint32 ms)
 {
 	// usleep precision on miyoo mini is 10ms :lolsob:
-	Uint32 ticks = SDL_GetTicks() + ms;
-	while((int)(ticks-SDL_GetTicks())>10) usleep(1);
-	while(SDL_GetTicks()<ticks) sched_yield();
-	return;
+    Uint32 startticks = SDL_GetTicks();
+    Uint32 targetticks = startticks + ms;
+    Uint32 nowticks;
+    if (ms > 10) usleep((ms - 10) * 1000);
+    do {
+        sched_yield();
+        nowticks = SDL_GetTicks();
+    } while((nowticks < targetticks)&&(nowticks >= startticks));
+    return;
 	
 #if SDL_THREAD_PTH
 	pth_time_t tv;
