@@ -48,9 +48,8 @@ static SDL_Surface * _SDL_SetVideoMode (int width, int height, int bpp, Uint32 f
 
 static SDL_Surface* battery;
 static int hide_battery = 0;
-
-static unsigned long battery_ticks = 0;
 static int has_low_battery = 0;
+static unsigned long battery_ticks = 0;
 
 // basd on GFX_rev10
 
@@ -212,19 +211,16 @@ static void	GFX_Flip(SDL_Surface *surface) {
 		if (!hide_battery) {
 			unsigned long now = SDL_GetTicks();
 			int had_low_battery = has_low_battery;
-			if (!battery_ticks || now-battery_ticks>=3000) {
+			if (!battery_ticks || now-battery_ticks>=5000) {
 				battery_ticks = now;
-				char* path = "/tmp/adc";
-				int min = 505; // was 439
-				int max = 546; // was 500
+				char* path = "/tmp/battery";
 				int value = 0;
 				FILE *file = fopen(path, "r");
 				if (file!=NULL) {
 					fscanf(file, "%i", &value);
 					fclose(file);
 				}
-				int scaled = (value - min) * 6 / (max - min);
-				has_low_battery = scaled==0;
+				has_low_battery = value<=10; // 
 			}
 			if (has_low_battery) SDL_BlitSurface(battery, NULL, surface, &(SDL_Rect){602,8});
 			else if (had_low_battery!=has_low_battery) SDL_FillRect(surface, &(SDL_Rect){602,8,battery->w,battery->h}, 0); // clear battery icon
