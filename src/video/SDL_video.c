@@ -220,7 +220,7 @@ static void	GFX_Flip(SDL_Surface *surface) {
 					fscanf(file, "%i", &value);
 					fclose(file);
 				}
-				has_low_battery = value<=10; // 
+				has_low_battery = value<=10;
 			}
 			if (has_low_battery) SDL_BlitSurface(battery, NULL, surface, &(SDL_Rect){602,8});
 			else if (had_low_battery!=has_low_battery) SDL_FillRect(surface, &(SDL_Rect){602,8,battery->w,battery->h}, 0); // clear battery icon
