@@ -90,7 +90,7 @@ AudioBootStrap MIAO_bootstrap = {
 
 // based on AO_rev6
 
-#define	YIELD_WAIT	// Flag to wait with sched_yield() when the wait time is less than 10.5ms
+// #define	YIELD_WAIT	// Flag to wait with sched_yield() when the wait time is less than 10.5ms
 			// ( callback function will be called at more precise timing,
 			//   but may cause blocking/slowdown of low-priority daemons/threads execution )
 #ifdef	YIELD_WAIT
@@ -134,17 +134,17 @@ static void MIAO_WaitAudio(_THIS)
 		startclock = tod.tv_usec + tod.tv_sec * 1000000;
 	} else if (usleepclock > 0) {
 #ifdef	YIELD_WAIT
-			// rev6 : wait process for miyoomini with 10ms sleep precision
-			if (usleepclock > 10500) usleep(usleepclock - 10500);	// 0.5ms margin
-			// wait for less than 10.5ms with sched_yield()
-			sched_setscheduler(0, SCHED_IDLE, &scprm);
-			do { sched_yield(); gettimeofday(&tod, NULL);
-			} while (targetclock > (tod.tv_usec + tod.tv_sec * 1000000));
-			sched_setscheduler(0, policy, &scprm);
+		// rev6 : wait process for miyoomini with 10ms sleep precision
+		if (usleepclock > 10500) usleep(usleepclock - 10500);	// 0.5ms margin
+		// wait for less than 10.5ms with sched_yield()
+		sched_setscheduler(0, SCHED_IDLE, &scprm);
+		do { sched_yield(); gettimeofday(&tod, NULL);
+		} while (targetclock > (tod.tv_usec + tod.tv_sec * 1000000));
+		sched_setscheduler(0, policy, &scprm);
 #else
-			usleep(usleepclock);
+		// usleep(usleepclock);
+		SDL_Delay(usleepclock / 1000 + 1);
 #endif
-		// SDL_Delay(usleepclock / 1000 + 1);
 	}
 }
 
