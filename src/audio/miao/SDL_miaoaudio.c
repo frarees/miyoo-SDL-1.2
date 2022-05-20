@@ -40,7 +40,14 @@ static void MIAO_CloseAudio(_THIS);
 
 static int Audio_Available(void)
 {
-	return(1);
+    MI_AUDIO_Attr_t    attr;
+    memset(&attr, 0, sizeof(attr));
+    attr.eSamplerate = 48000;
+    attr.eSoundmode = 1;
+    attr.u32ChnCnt = 2;
+    attr.u32PtNumPerFrm = 256;
+    if (MI_AO_SetPubAttr(0,&attr)) return(0);
+    return(1);
 }
 
 static void Audio_DeleteDevice(SDL_AudioDevice *device)
