@@ -97,7 +97,7 @@ AudioBootStrap MIAO_bootstrap = {
 	Audio_Available, Audio_CreateDevice
 };
 
-// based on AO_rev6
+// based on AOSample_rev7
 
 // #define	YIELD_WAIT	// Flag to wait with sched_yield() when the wait time is less than 10.5ms
 			// ( callback function will be called at more precise timing,
@@ -131,7 +131,7 @@ static void MIAO_WaitAudio(_THIS)
 	}
 	targetclock = framecounter * clock_freqframes / this->spec.freq + startclock;
 	gettimeofday(&tod, NULL);
-	usleepclock = framecounter * clock_freqframes / this->spec.freq + startclock - (tod.tv_usec + tod.tv_sec * 1000000);
+	usleepclock = targetclock - (tod.tv_usec + tod.tv_sec * 1000000);
 	// check 300ms under/overrun (1frame max = 256ms at 8kHz/2048samples)
 	if ((usleepclock < -300000)||(usleepclock > 300000)) {
 		// reset buffer
@@ -143,7 +143,7 @@ static void MIAO_WaitAudio(_THIS)
 		startclock = tod.tv_usec + tod.tv_sec * 1000000;
 	} else if (usleepclock > 0) {
 #ifdef	YIELD_WAIT
-		// rev6 : wait process for miyoomini with 10ms sleep precision
+		// wait process for miyoomini with 10ms sleep precision
 		if (usleepclock > 10500) usleep(usleepclock - 10500);	// 0.5ms margin
 		// wait for less than 10.5ms with sched_yield()
 		sched_setscheduler(0, SCHED_IDLE, &scprm);
@@ -217,7 +217,7 @@ static int MIAO_OpenAudio(_THIS, SDL_AudioSpec *spec)
 		if (spec->freq <= freqtable[i]) { spec->freq = freqtable[i]; break; }
 	} if (spec->freq > 48000) spec->freq = 48000;
 	if (spec->samples > 2048) spec->samples = 2048;
-	else if (spec->samples < 4) spec->samples = 4;
+	else if (spec->samples < 8) spec->samples = 8;
 	spec->size = spec->samples * spec->channels * 2;
 
 	memset(&attr, 0, sizeof(attr));
@@ -226,10 +226,11 @@ static int MIAO_OpenAudio(_THIS, SDL_AudioSpec *spec)
 	attr.u32ChnCnt = spec->channels;
 	attr.u32PtNumPerFrm = spec->samples;
 
-	if (MI_AO_SetPubAttr(0,&attr)) return(-1);
-	if (MI_AO_Enable(0)) return(-1);
-	if (MI_AO_EnableChn(0,0)) return(-1);
-	if (MI_AO_ClearChnBuf(0,0)) return(-1);
+	if (MI_AO_SetPubAttr(0,&attr)) return -1;
+	if (MI_AO_Enable(0)) return -1;
+	if (MI_AO_EnableChn(0,0)) return -1;
+	if (MI_AO_SetMute(0,FALSE)) return -1;
+	//if (MI_AO_SetVolume(0,0)) return -1;
 
 	InitSettings(); // restores volume
 
@@ -260,6 +261,7 @@ static int MIAO_OpenAudio(_THIS, SDL_AudioSpec *spec)
 	// Buffer initial frames (calculate at least 20ms)
 	num_frames = (uint32_t)((spec->freq-1) / (50*spec->samples)) +1;
 	if (num_frames < 2) num_frames = 2;
+	MI_AO_ClearChnBuf(0,0);
 	for (i=num_frames; i>0; i--) MI_AO_SendFrame(0, 0, frame, 0);
 	
 	clock_freqframes = spec->samples * 1000000;
