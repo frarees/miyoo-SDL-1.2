@@ -151,8 +151,7 @@ static void MIAO_WaitAudio(_THIS)
 		} while (targetclock > (tod.tv_usec + tod.tv_sec * 1000000));
 		sched_setscheduler(0, policy, &scprm);
 #else
-		// usleep(usleepclock);
-		SDL_Delay(usleepclock / 1000 + 1);
+		usleep(usleepclock);
 #endif
 	}
 }
