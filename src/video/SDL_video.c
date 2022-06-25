@@ -416,7 +416,16 @@ static void	GFX_Quit(void) {
 
 		MI_GFX_WaitAllDone(TRUE, 0);
 		if (shadowPa) MI_SYS_MMA_Free(shadowPa);
-		GFX_ClearFrameBuffer();
+		
+		if (getenv("SDL_FBCON_DONT_CLEAR")) {
+            // copy current frame to initial frame
+            ioctl(fd_fb, FBIOGET_VSCREENINFO, &vinfo);
+            if (vinfo.yoffset) MI_SYS_MemcpyPa(finfo.smem_start, finfo.smem_start + (640*vinfo.yoffset*4), 640*480*4);
+        } else {
+            // clear entire FB
+            GFX_ClearFrameBuffer();
+        }
+		
 		vinfo.yoffset = 0;
 		ioctl(fd_fb, FBIOPUT_VSCREENINFO, &vinfo);
 
