@@ -1,5 +1,5 @@
 #!/bin/sh
-export CC="/opt/trimui-toolchain/bin/arm-linux-gcc"
+export CC="${CROSS_COMPILE}gcc"
 export CFLAGS="-Os -flto"
 export LDFLAGS="-Wl,--gc-sections"
 ./configure --host=arm-buildroot-linux-gnueabi\
