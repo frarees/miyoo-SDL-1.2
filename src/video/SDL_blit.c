@@ -154,8 +154,8 @@ static __inline__ void SDL_memcpySSE(Uint8 *to, const Uint8 *from, int len)
 
 static void Blit180(uint32_t* restrict dst, uint32_t* restrict src) {
 	uint32_t i;
-	src += 640*480-1;
-	for (i=640*480; i>0; i--) {
+	src += 752*560-1;
+	for (i=752*560; i>0; i--) {
 		*dst++ = *src--;
 	}
 }
