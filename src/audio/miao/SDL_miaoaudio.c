@@ -26,8 +26,6 @@
 #include <linux/input.h>
 #include <SDL/SDL.h>
 
-#include <msettings.h> // TODO: remove me
-
 /* The tag name used by MI_AO audio */
 #define MIAO_DRIVER_NAME         "miao"
 
@@ -187,8 +185,6 @@ static void MIAO_CloseAudio(_THIS)
 	MI_AO_DisableChn(0,0);
 	MI_AO_Disable(0);
 	
-	QuitSettings();
-	
 	if ( mixbuf != NULL ) {
 		SDL_FreeAudioMem(mixbuf);
 		mixbuf = NULL;
@@ -231,8 +227,6 @@ static int MIAO_OpenAudio(_THIS, SDL_AudioSpec *spec)
 	if (MI_AO_EnableChn(0,0)) return -1;
 	if (MI_AO_SetMute(0,FALSE)) return -1;
 	//if (MI_AO_SetVolume(0,0)) return -1;
-
-	InitSettings(); // restores volume
 
 	mixlen = spec->size;
 	mixbuf = (Uint8 *)SDL_AllocAudioMem(mixlen);

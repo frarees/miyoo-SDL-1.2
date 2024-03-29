@@ -760,6 +760,7 @@ int SDL_VideoInit (const char *driver_name, Uint32 flags)
 	SDL_memset(&vformat, 0, sizeof(vformat));
 	if ( video->VideoInit(video, &vformat) < 0 ) {
 		SDL_VideoQuit();
+		SDL_SetError("Failed to initialize the video subsystem");
 		return(-1);
 	}
 
@@ -770,6 +771,7 @@ int SDL_VideoInit (const char *driver_name, Uint32 flags)
 				vformat.Rmask, vformat.Gmask, vformat.Bmask, 0);
 	if ( SDL_VideoSurface == NULL ) {
 		SDL_VideoQuit();
+		SDL_SetError("Failed to create zero sized video surface");
 		return(-1);
 	}
 	SDL_PublicSurface = NULL;	/* Until SDL_SetVideoMode() */
@@ -791,6 +793,7 @@ int SDL_VideoInit (const char *driver_name, Uint32 flags)
 	/* Start the event loop */
 	if ( SDL_StartEventLoop(flags) < 0 ) {
 		SDL_VideoQuit();
+		SDL_SetError("Failed to start the event loop");
 		return(-1);
 	}
 	SDL_CursorInit(flags & SDL_INIT_EVENTTHREAD);

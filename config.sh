@@ -4,7 +4,7 @@ export AR="${CROSS_COMPILE}gcc-ar"
 export RANLIB="${CROSS_COMPILE}gcc-ranlib"
 export CFLAGS="-O3 -flto"
 export CPPFLAGS=""
-export LDFLAGS=" -lmi_sys -lmi_ao -lmi_gfx -lcam_os_wrapper -lmsettings -Wl,--gc-sections"
+export LDFLAGS=" -lmi_sys -lmi_ao -lmi_gfx -lcam_os_wrapper -Wl,--gc-sections"
 # NOTE: LIBS doesn't seem to be used so I had to put the libs in the LDFLAGS
 ./configure --host=arm-linux-gnueabihf\
  --enable-alsa=no\
